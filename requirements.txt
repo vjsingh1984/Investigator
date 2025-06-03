@@ -1,0 +1,53 @@
+# Core dependencies
+requests>=2.31.0
+pandas>=2.0.0
+numpy>=1.24.0
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0
+
+# Yahoo Finance API
+yfinance>=0.2.0
+
+# XML parsing (optional but recommended)
+lxml>=4.9.0
+
+# JSON handling
+ujson>=5.8.0
+
+# Data processing
+pyarrow>=13.0.0
+
+# PDF generation
+reportlab>=4.0.0
+
+# Email functionality
+secure-smtplib>=0.1.1
+
+# Progress bars and CLI
+tqdm>=4.66.0
+click>=8.1.0
+
+# Date/time handling
+python-dateutil>=2.8.0
+
+# Caching
+diskcache>=5.6.0
+
+# Configuration
+pyyaml>=6.0.0
+
+# Development/Testing (optional)
+pytest>=7.4.0
+pytest-cov>=4.1.0
+coverage>=7.3.0
+
+# Jupyter support (optional)
+jupyter>=1.0.0
+ipykernel>=6.25.0
+
+# Visualization (optional)
+matplotlib>=3.7.0
+plotly>=5.15.0
+
+# Security
+cryptography>=41.0.0

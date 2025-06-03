@@ -106,7 +106,7 @@ InvestiGator is a comprehensive investment research platform that runs entirely 
 == 🏗️ System Architecture
 
 [mermaid]
-....
+----
 graph TB
     subgraph "Entry Point"
         SHELL["🐢 investigator.sh<br/>Bash Orchestrator"]
@@ -213,7 +213,7 @@ graph TB
     class OLLAMA,LLAMA31 ai
     class DB,DAOS storage
     class PDF,EMAIL,LOGS output
-....
+----
 
 === Component Descriptions
 
@@ -277,7 +277,7 @@ The InvestiGator analysis pipeline consists of three sequential stages:
 === Analysis Pipeline Sequence
 
 [mermaid]
-....
+----
 sequenceDiagram
     participant User
     participant Orchestrator
@@ -320,12 +320,12 @@ sequenceDiagram
     LLM->>Database: Store synthesis (llm_type='full')
     Synthesizer->>Report: Generate PDF
     Report-->>User: Investment Report
-....
+----
 
 === Data Processing Flow
 
 [mermaid]
-....
+----
 flowchart LR
     subgraph Input
         SYMBOL[Stock Symbol]
@@ -393,7 +393,7 @@ flowchart LR
     
     SLLM --> REPORT
     REPORT --> EMAIL
-....
+----
 
 [[cache-management]]
 == 💾 Cache Management System
@@ -405,7 +405,7 @@ InvestiGator features a sophisticated multi-level caching system designed for op
 === Cache Architecture
 
 [mermaid]
-....
+----
 graph TB
     subgraph "Cache Configuration"
         CONFIG["⚙️ config.json<br/>Cache Control"]
@@ -468,7 +468,7 @@ graph TB
     class FILE_HANDLER,PARQUET_HANDLER,RDBMS_HANDLER handler
     class DISK,DATABASE storage
     class READ,WRITE,CLEANUP,INSPECT operation
-....
+----
 
 === Cache Configuration
 
@@ -523,7 +523,7 @@ The cache system uses a list-based configuration approach for maximum flexibilit
 === Cache Types & Handlers
 
 [plantuml]
-....
+----
 @startuml
 title Cache Type to Handler Mapping
 
@@ -593,7 +593,7 @@ note right of ParquetCacheHandler : Used for tabular data\nwith Parquet + gzip
 
 note right of RDBMSCacheHandler : Used for all types\nwhen RDBMS enabled
 @enduml
-....
+----
 
 [[cache-structure]]
 
@@ -646,7 +646,7 @@ InvestiGator/
 === Database Schema
 
 [mermaid]
-....
+----
 erDiagram
     TICKER_CIK_MAPPING {
         varchar ticker PK
@@ -720,7 +720,7 @@ erDiagram
     QUARTERLY_METRICS ||--o{ QUARTERLY_AI_SUMMARIES : "analyzed by"
     QUARTERLY_AI_SUMMARIES ||--o{ LLM_RESPONSE_STORE : "stored as"
     LLM_RESPONSE_STORE ||--o{ LLM_RESPONSE_STORE : "synthesizes"
-....
+----
 
 === Cache Strategy
 
@@ -840,7 +840,7 @@ cleanup.truncate_cache_tables(symbol='AAPL')      # Database only
 === Cache Flow Diagram
 
 [mermaid]
-....
+----
 flowchart TD
     START(["Cache Operation Request"]) --> CONFIG_CHECK{"Check Cache Config"}
     
@@ -910,7 +910,7 @@ flowchart TD
     class DISK_READ,DB_READ,PRIORITY_READ,FETCH_FRESH,PROMOTE process
     class DISK_WRITE,DB_WRITE,DISK_COMPRESS,DB_COMPRESS storage
     class SUCCESS,RETURN_DISK,RETURN_DB,NO_CACHE success
-....
+----
 
 === LLM Observability
 

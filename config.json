@@ -1,0 +1,67 @@
+{
+  "database": {
+    "host": "localhost",
+    "port": 5432,
+    "database": "investment_ai",
+    "username": "investment_user",
+    "password": "investment_pass",
+    "pool_size": 10,
+    "max_overflow": 20
+  },
+  "sec": {
+    "user_agent": "InvestiGator/1.0 (research@example.com)",
+    "base_url": "https://data.sec.gov/",
+    "rate_limit": 10,
+    "cache_dir": "data/sec_cache",
+    "ticker_cache_file": "data/ticker_cik_map.txt",
+    "max_retries": 3,
+    "timeout": 30
+  },
+  "analysis": {
+    "fundamental_weight": 0.6,
+    "technical_weight": 0.4,
+    "min_score_for_buy": 7.0,
+    "max_score_for_sell": 4.0,
+    "lookback_days": 365,
+    "min_volume": 1000000
+  },
+  "ollama": {
+    "base_url": "http://localhost:11434",
+    "models": {
+      "fundamental_analysis": "llama3.1:8b-instruct-q8_0",
+      "technical_analysis": "llama3.1:8b-instruct-q8_0", 
+      "synthesis": "llama3.1:8b-instruct-q8_0"
+    },
+    "timeout": 300,
+    "max_retries": 3,
+    "min_context_size": 8192,
+    "num_llm_threads": 1,
+    "num_predict": {
+      "fundamental_analysis": 2048,
+      "technical_analysis": 1024,
+      "synthesis": 2048
+    }
+  },
+  "cache_control": {
+    "storage": ["disk", "rdbms"],
+    "types": null,
+    "read_from_cache": true,
+    "write_to_cache": true,
+    "force_refresh": false,
+    "force_refresh_symbols": null,
+    "cache_ttl_override": null
+  },
+  "email": {
+    "enabled": false,
+    "smtp_server": "smtp.gmail.com",
+    "smtp_port": 587,
+    "use_tls": true,
+    "username": "",
+    "password": "",
+    "from_address": "investigator@example.com",
+    "recipients": []
+  },
+  "tracking": {
+    "symbols": ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "NVDA", "META", "NFLX", "V", "MA"]
+  }
+}

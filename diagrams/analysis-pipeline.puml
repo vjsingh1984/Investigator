@@ -1,0 +1,64 @@
+@startuml analysis-pipeline
+!theme plain
+title InvestiGator Analysis Pipeline Flow
+
+participant "🐢 investigator.sh" as SHELL
+participant "📊 sec_fundamental.py" as SEC
+participant "📈 yahoo_technical.py" as TECH
+participant "🔗 synthesizer.py" as SYNTH
+participant "🦙 Ollama LLM" as LLM
+participant "💾 Cache System" as CACHE
+participant "🗄️ Database" as DB
+participant "📄 PDF Report" as REPORT
+
+== Stage 1: SEC Fundamental Analysis ==
+SHELL -> SEC: --symbol AAPL
+SEC -> CACHE: Check ticker mapping cache
+alt Cache Hit
+    CACHE --> SEC: CIK: 0000320193
+else Cache Miss
+    SEC -> SEC: Fetch ticker.txt from SEC
+    SEC -> CACHE: Store ticker mappings
+end
+
+SEC -> CACHE: Check submissions cache
+alt Cache Hit
+    CACHE --> SEC: Cached submissions
+else Cache Miss
+    SEC -> SEC: Fetch from SEC EDGAR API
+    SEC -> CACHE: Store submissions
+end
+
+SEC -> SEC: Extract quarterly periods
+loop For each quarterly period
+    SEC -> LLM: Analyze quarterly filing
+    LLM --> SEC: Financial insights
+    SEC -> DB: Store LLM response (llm_type='sec')
+    SEC -> CACHE: Cache quarterly metrics
+end
+
+== Stage 2: Technical Analysis ==
+SHELL -> TECH: --symbol AAPL
+TECH -> TECH: Fetch 365 days price data (Yahoo Finance)
+TECH -> TECH: Calculate 30+ technical indicators
+TECH -> CACHE: Store technical data (Parquet)
+TECH -> LLM: Analyze technical indicators
+LLM --> TECH: Technical insights
+TECH -> DB: Store LLM response (llm_type='ta')
+
+== Stage 3: Investment Synthesis ==
+SHELL -> SYNTH: --symbol AAPL --report
+SYNTH -> DB: Fetch SEC analysis (llm_type='sec')
+SYNTH -> DB: Fetch technical analysis (llm_type='ta')
+SYNTH -> SYNTH: Combine analyses (60% fund, 40% tech)
+SYNTH -> LLM: Generate investment synthesis
+LLM --> SYNTH: Investment recommendation
+SYNTH -> DB: Store synthesis (llm_type='full')
+SYNTH -> REPORT: Generate PDF report
+REPORT --> SHELL: Investment_Report_AAPL_YYYY-MM-DD.pdf
+
+note right of LLM: All LLM interactions\nuse local Ollama server\nwith llama3.1:8b model
+
+note right of CACHE: Multi-level caching:\n- Memory (priority 30)\n- Disk (priority 20)\n- Database (priority 10)
+
+@enduml

@@ -1,0 +1,107 @@
+flowchart TD
+    START([🎯 Cache Operation Request]) --> CONFIG_CHECK{⚙️ Check Cache Config}
+    
+    CONFIG_CHECK -->|"storage: []"| NO_CACHE[❌ Skip Cache<br/>Return None]
+    CONFIG_CHECK -->|"storage: ['disk']"| DISK_ONLY[💾 Disk Only Mode]
+    CONFIG_CHECK -->|"storage: ['rdbms']"| DB_ONLY[🗄️ Database Only Mode]
+    CONFIG_CHECK -->|"storage: ['disk','rdbms']"| BOTH_STORAGE[🔄 Multi-Storage Mode]
+    
+    subgraph FORCE_CHECK["🔄 Force Refresh Checks"]
+        CHECK_GLOBAL{🌍 Global Force Refresh?}
+        CHECK_SYMBOL{🎯 Symbol-Specific<br/>Force Refresh?}
+        CHECK_TTL{⏰ TTL Override?}
+    end
+    
+    subgraph DISK_FLOW["💾 Disk Cache Operations"]
+        DISK_READ[📖 Read from Disk]
+        DISK_HIT{✅ Cache Hit?}
+        DISK_WRITE[💾 Write to Disk]
+        DISK_COMPRESS[🗜️ gzip Compression<br/>Level 9]
+        DISK_STATS[📊 Update Disk Stats]
+    end
+    
+    subgraph DB_FLOW["🗄️ Database Cache Operations"]
+        DB_READ[📊 Read from Database]
+        DB_HIT{✅ Cache Hit?}
+        DB_WRITE[🗄️ Write to Database]
+        DB_COMPRESS[📦 JSONB Compression]
+        DB_STATS[📈 Update DB Stats]
+    end
+    
+    subgraph PRIORITY_FLOW["🏆 Priority Resolution"]
+        PRIORITY_READ[📋 Priority Read Order<br/>Disk to Database]
+        CACHE_HIT_CHECK{🎯 Cache Hit?}
+        PROMOTE[⬆️ Promote to Higher Priority<br/>Database to Disk]
+        FETCH_FRESH[🔄 Fetch Fresh Data]
+    end
+    
+    subgraph HANDLER_ROUTING["🎯 Handler Routing"]
+        TYPE_CHECK{📋 Check Cache Type}
+        FILE_HANDLER[📁 FileCacheHandler<br/>SEC, LLM, Facts, Metrics]
+        PARQUET_HANDLER[📊 ParquetHandler<br/>Technical, Submissions]
+        RDBMS_HANDLER[🗄️ RDBMSHandler<br/>All Types when enabled]
+    end
+    
+    DISK_ONLY --> FORCE_CHECK
+    DB_ONLY --> FORCE_CHECK
+    BOTH_STORAGE --> FORCE_CHECK
+    
+    FORCE_CHECK --> CHECK_GLOBAL
+    CHECK_GLOBAL -->|Yes| FETCH_FRESH
+    CHECK_GLOBAL -->|No| CHECK_SYMBOL
+    CHECK_SYMBOL -->|Yes| FETCH_FRESH
+    CHECK_SYMBOL -->|No| CHECK_TTL
+    CHECK_TTL -->|Expired| FETCH_FRESH
+    CHECK_TTL -->|Valid| TYPE_CHECK
+    
+    TYPE_CHECK --> FILE_HANDLER
+    TYPE_CHECK --> PARQUET_HANDLER
+    TYPE_CHECK --> RDBMS_HANDLER
+    
+    FILE_HANDLER --> PRIORITY_FLOW
+    PARQUET_HANDLER --> DISK_FLOW
+    RDBMS_HANDLER --> DB_FLOW
+    
+    PRIORITY_READ --> DISK_READ
+    DISK_READ --> DISK_HIT
+    DISK_HIT -->|Hit| CACHE_HIT_CHECK
+    DISK_HIT -->|Miss| DB_READ
+    
+    DB_READ --> DB_HIT
+    DB_HIT -->|Hit| CACHE_HIT_CHECK
+    DB_HIT -->|Miss| FETCH_FRESH
+    
+    CACHE_HIT_CHECK -->|From Disk| RETURN_DISK[✅ Return Data from Disk]
+    CACHE_HIT_CHECK -->|From Database| PROMOTE
+    PROMOTE --> DISK_WRITE
+    PROMOTE --> RETURN_DB[✅ Return Data from Database]
+    
+    FETCH_FRESH --> WRITE_ALL[📝 Write to All Enabled Storages]
+    WRITE_ALL --> DISK_WRITE
+    WRITE_ALL --> DB_WRITE
+    
+    DISK_WRITE --> DISK_COMPRESS
+    DISK_COMPRESS --> DISK_STATS
+    DB_WRITE --> DB_COMPRESS
+    DB_COMPRESS --> DB_STATS
+    
+    DISK_STATS --> SUCCESS[✅ Operation Complete]
+    DB_STATS --> SUCCESS
+    RETURN_DISK --> SUCCESS
+    RETURN_DB --> SUCCESS
+    NO_CACHE --> SUCCESS
+    
+    %% Styling
+    classDef start fill:#e8f5e8,stroke:#4caf50,stroke-width:3px
+    classDef decision fill:#fff2cc,stroke:#d6b656,stroke-width:2px
+    classDef process fill:#d5e8d4,stroke:#82b366,stroke-width:2px
+    classDef storage fill:#dae8fc,stroke:#6c8ebf,stroke-width:2px
+    classDef success fill:#e1d5e7,stroke:#9673a6,stroke-width:2px
+    classDef handler fill:#f8cecc,stroke:#b85450,stroke-width:2px
+    
+    class START start
+    class CONFIG_CHECK,CHECK_GLOBAL,CHECK_SYMBOL,CHECK_TTL,DISK_HIT,DB_HIT,CACHE_HIT_CHECK,TYPE_CHECK decision
+    class DISK_READ,DB_READ,PRIORITY_READ,FETCH_FRESH,PROMOTE,WRITE_ALL process
+    class DISK_WRITE,DB_WRITE,DISK_COMPRESS,DB_COMPRESS,DISK_STATS,DB_STATS storage
+    class SUCCESS,RETURN_DISK,RETURN_DB,NO_CACHE success
+    class FILE_HANDLER,PARQUET_HANDLER,RDBMS_HANDLER handler

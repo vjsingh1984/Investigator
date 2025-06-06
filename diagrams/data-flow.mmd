@@ -1,0 +1,100 @@
+flowchart LR
+    subgraph Input["📥 Input Sources"]
+        TICKER[🏷️ Stock Symbol<br/>e.g., AAPL]
+        CONFIG[⚙️ config.json<br/>System Configuration]
+    end
+    
+    subgraph "🔍 Data Collection"
+        CIK_LOOKUP[🆔 CIK Lookup<br/>SEC ticker.txt]
+        SEC_SUB[📋 SEC Submissions<br/>EDGAR API]
+        SEC_FACTS[📊 Company Facts<br/>XBRL Data]
+        FRAME_API[🏗️ Frame API<br/>Quarterly Metrics]
+        YAHOO_PRICE[📈 Price Data<br/>Yahoo Finance]
+    end
+    
+    subgraph "⚙️ Data Processing"
+        QPARSE[📅 Quarterly Parsing<br/>Financial Periods]
+        FILING_PARSE[📄 Filing Parser<br/>10-K/10-Q Analysis]
+        TECH_IND[📊 Technical Indicators<br/>30+ Calculations]
+        SCORE_CALC[🎯 Score Calculation<br/>0-10 Scale]
+    end
+    
+    subgraph "🤖 AI Analysis"
+        FUND_LLM[💼 Fundamental LLM<br/>SEC Filing Analysis]
+        TECH_LLM[📈 Technical LLM<br/>Indicator Analysis]
+        SYNTH_LLM[🔗 Synthesis LLM<br/>Combined Analysis]
+    end
+    
+    subgraph "💾 Storage & Cache"
+        DISK_CACHE[💽 Disk Cache<br/>JSON + gzip]
+        DB_CACHE[🗄️ Database Cache<br/>PostgreSQL JSONB]
+        PARQUET[📦 Parquet Files<br/>Technical Data]
+        LLM_CACHE[🧠 LLM Cache<br/>Prompts + Responses]
+    end
+    
+    subgraph "📊 Output Generation"
+        PDF_REPORT[📄 PDF Report<br/>Investment Analysis]
+        EMAIL_ALERT[📧 Email Alert<br/>Optional Delivery]
+        JSON_EXPORT[🔗 JSON Export<br/>Structured Data]
+        LOGS[📋 Logs<br/>Processing Details]
+    end
+    
+    %% Data flow connections
+    TICKER --> CIK_LOOKUP
+    CIK_LOOKUP --> SEC_SUB
+    CIK_LOOKUP --> SEC_FACTS
+    CIK_LOOKUP --> FRAME_API
+    TICKER --> YAHOO_PRICE
+    
+    SEC_SUB --> QPARSE
+    SEC_FACTS --> QPARSE
+    FRAME_API --> QPARSE
+    SEC_SUB --> FILING_PARSE
+    
+    YAHOO_PRICE --> TECH_IND
+    QPARSE --> SCORE_CALC
+    TECH_IND --> SCORE_CALC
+    
+    QPARSE --> FUND_LLM
+    FILING_PARSE --> FUND_LLM
+    TECH_IND --> TECH_LLM
+    FUND_LLM --> SYNTH_LLM
+    TECH_LLM --> SYNTH_LLM
+    
+    %% Cache connections
+    SEC_SUB --> DISK_CACHE
+    SEC_FACTS --> DISK_CACHE
+    FUND_LLM --> LLM_CACHE
+    TECH_LLM --> LLM_CACHE
+    SYNTH_LLM --> LLM_CACHE
+    YAHOO_PRICE --> PARQUET
+    
+    DISK_CACHE --> DB_CACHE
+    LLM_CACHE --> DB_CACHE
+    
+    %% Output connections
+    SYNTH_LLM --> PDF_REPORT
+    PDF_REPORT --> EMAIL_ALERT
+    SYNTH_LLM --> JSON_EXPORT
+    CONFIG --> LOGS
+    
+    %% Cache read paths (dotted lines for retrieval)
+    DISK_CACHE -.->|Cache Hit| FUND_LLM
+    DB_CACHE -.->|Cache Hit| TECH_LLM
+    PARQUET -.->|Historical Data| TECH_IND
+    LLM_CACHE -.->|Previous Analysis| SYNTH_LLM
+    
+    %% Styling
+    classDef input fill:#e8f5e8,stroke:#4caf50,stroke-width:2px
+    classDef collection fill:#e3f2fd,stroke:#2196f3,stroke-width:2px
+    classDef processing fill:#f3e5f5,stroke:#9c27b0,stroke-width:2px
+    classDef ai fill:#fff3e0,stroke:#ff9800,stroke-width:2px
+    classDef storage fill:#fce4ec,stroke:#e91e63,stroke-width:2px
+    classDef output fill:#e0f2f1,stroke:#009688,stroke-width:2px
+    
+    class TICKER,CONFIG input
+    class CIK_LOOKUP,SEC_SUB,SEC_FACTS,FRAME_API,YAHOO_PRICE collection
+    class QPARSE,FILING_PARSE,TECH_IND,SCORE_CALC processing
+    class FUND_LLM,TECH_LLM,SYNTH_LLM ai
+    class DISK_CACHE,DB_CACHE,PARQUET,LLM_CACHE storage
+    class PDF_REPORT,EMAIL_ALERT,JSON_EXPORT,LOGS output

@@ -1,0 +1,156 @@
+graph TB
+    %% Synthesis Mode Architecture Flow
+    classDef synthesisClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef cacheClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef templateClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef outputClass fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+    classDef dataClass fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+
+    %% Entry Point
+    CLI["`🎯 **CLI Entry**
+    --synthesis-mode comprehensive
+    --synthesis-mode quarterly`"]:::synthesisClass
+    
+    %% Main Synthesizer
+    SYN["`🤖 **Synthesizer**
+    Mode Selection Engine
+    • generate_recommendation()
+    • _extract_sec_comprehensive_data()
+    • _extract_technical_indicators()
+    • _create_recommendation_from_llm_data()`"]:::synthesisClass
+    
+    %% Mode Decision
+    MODE{"`🔀 **Mode Switch**
+    synthesis_mode?`"}:::synthesisClass
+    
+    %% Templates
+    COMP_TMPL["`📊 **Comprehensive Template**
+    investment_synthesis_comprehensive.j2
+    
+    🚀 **60% Faster Processing**
+    • Direct LLM response extraction
+    • Cached SEC comprehensive data
+    • Cached technical indicators
+    • Optimized JSON parsing`"]:::templateClass
+    
+    QUART_TMPL["`📋 **Quarterly Template**
+    investment_synthesis_quarterly_mode.j2
+    
+    ⚡ **25% Faster Processing**
+    • Quarter-by-quarter analysis
+    • Trend progression tracking
+    • Incremental data building
+    • Temporal pattern recognition`"]:::templateClass
+    
+    PEER_TMPL["`🏢 **Peer Template**
+    investment_synthesis_peer.j2
+    
+    🎯 **Peer-Relative Analysis**
+    • Industry comparisons
+    • Relative valuations
+    • Sector positioning
+    • Competitive analysis`"]:::templateClass
+    
+    %% Data Sources
+    SEC_DATA["`📊 **SEC Comprehensive**
+    Cached LLM Response
+    
+    🧠 **Thinking Extraction:**
+    • analysis_summary
+    • investment_thesis
+    • quarterly_analyses.detail
+    
+    📈 **Scores:**
+    • business_quality_score: 9.1
+    • fundamental_score: 8.2
+    • growth_score: 7.5`"]:::dataClass
+    
+    TECH_DATA["`🔧 **Technical Analysis**
+    File Cache (response_technical_indicators.txt)
+    
+    🧠 **Thinking Extraction:**
+    • thinking (detailed reasoning)
+    • momentum_signals[]
+    • risk_factors[]
+    
+    📈 **Scores:**
+    • technical_score: 5.5 (FIXED!)
+    • support_levels: [193.46, 194.43]
+    • resistance_levels: [213.94, 214.23]`"]:::dataClass
+    
+    %% Cache System
+    CACHE["`💾 **Cache System**
+    Multi-Level Storage
+    
+    🗃️ **File Cache:**
+    • response_technical_indicators.txt
+    • File fallback mechanism
+    
+    💿 **Database Cache:**
+    • PostgreSQL JSONB
+    • llm_type differentiation
+    
+    🔑 **Cache Keys:**
+    • synthesis_comprehensive
+    • synthesis_quarterly`"]:::cacheClass
+    
+    %% Score Processing
+    SCORES["`📊 **Score Consolidation**
+    Duplicate Removal & Extraction
+    
+    ✅ **Fixed Scoring:**
+    • fundamental_score (not financial_health)
+    • growth_score (not growth_prospects)
+    • technical_score: 5.5 (was 0.0)
+    
+    🎯 **Weighted Overall:**
+    • Fundamental: 8.2/10 (60% weight)
+    • Technical: 5.5/10 (40% weight)
+    • **Overall: 7.1/10** (was 4.7/10)`"]:::outputClass
+    
+    %% PDF Generation
+    PDF["`📄 **Enhanced PDF Report**
+    Visual Components & Thinking
+    
+    🧠 **Thinking Sections:**
+    • SEC Fundamental Analysis Thinking
+    • Technical Analysis Thinking
+    • Synthesis Analysis Reasoning
+    
+    📊 **Visual Components:**
+    • ScoreCard flowables
+    • RecommendationBadge components
+    • Technical summary tables
+    • Support/resistance displays`"]:::outputClass
+    
+    %% Flow Connections
+    CLI --> SYN
+    SYN --> MODE
+    
+    MODE -->|comprehensive| COMP_TMPL
+    MODE -->|quarterly| QUART_TMPL
+    MODE -->|peer| PEER_TMPL
+    
+    %% Data extraction flows
+    COMP_TMPL --> SEC_DATA
+    COMP_TMPL --> TECH_DATA
+    QUART_TMPL --> SEC_DATA
+    QUART_TMPL --> TECH_DATA
+    
+    %% Cache interactions
+    SEC_DATA --> CACHE
+    TECH_DATA --> CACHE
+    
+    %% Processing flows
+    SEC_DATA --> SCORES
+    TECH_DATA --> SCORES
+    SCORES --> PDF
+    
+    %% Thinking extraction
+    CACHE -.->|thinking extraction| PDF
+    
+    %% Performance annotations
+    COMP_TMPL -.->|"60% faster"| SCORES
+    QUART_TMPL -.->|"25% faster"| SCORES
+    TECH_DATA -.->|"technical_score: 5.5"| SCORES
+    SCORES -.->|"overall: 7.1/10"| PDF

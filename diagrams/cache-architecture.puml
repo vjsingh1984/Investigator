@@ -1,0 +1,161 @@
+@startuml cache-architecture
+!theme plain
+title InvestiGator Cache Architecture
+
+package "Configuration Layer" {
+  class ConfigManager {
+    +cache_control: dict
+    +storage_backends: list
+    +cache_types: list
+    +read_from_cache: bool
+    +write_to_cache: bool
+    +force_refresh: bool
+    +force_refresh_symbols: list
+    +cache_ttl_override: int
+  }
+  
+  class ParquetConfig {
+    +compression: str
+    +compression_level: int
+    +engine: str
+    +use_dictionary: bool
+  }
+}
+
+package "Cache Management Core" {
+  class CacheManager {
+    +config: dict
+    +handlers: dict
+    +stats: CacheStats
+    --
+    +get(key, cache_type): Any
+    +set(key, value, cache_type): bool
+    +delete(key, cache_type): bool
+    +clear(cache_type): bool
+    +get_stats(): CacheStats
+    +get_handler(cache_type): CacheHandler
+  }
+  
+  class CacheStats {
+    +hits: int
+    +misses: int
+    +hit_rate: float
+    +storage_sizes: dict
+    +compression_ratios: dict
+    --
+    +record_hit(): void
+    +record_miss(): void
+    +calculate_hit_rate(): float
+  }
+}
+
+package "Cache Handlers" {
+  abstract class CacheHandler {
+    +priority: int
+    +compression: str
+    --
+    +get(key): Any
+    +set(key, value): bool
+    +delete(key): bool
+    +exists(key): bool
+    +clear(): bool
+    +get_size(): int
+  }
+  
+  class FileCacheHandler {
+    +priority: 20
+    +compression: "gzip"
+    +compression_level: 9
+    +base_path: str
+    --
+    +_get_file_path(key): str
+    +_compress_data(data): bytes
+    +_decompress_data(data): Any
+  }
+  
+  class ParquetCacheHandler {
+    +priority: 20
+    +compression: "gzip"
+    +engine: "fastparquet"
+    +base_path: str
+    --
+    +_save_parquet(df, path): bool
+    +_load_parquet(path): DataFrame
+    +_compress_parquet(path): bool
+  }
+  
+  class RDBMSCacheHandler {
+    +priority: 10
+    +compression: "jsonb"
+    +connection_pool: Pool
+    --
+    +_get_table_name(cache_type): str
+    +_serialize_value(value): str
+    +_deserialize_value(value): Any
+    +_execute_query(query, params): Result
+  }
+}
+
+package "Storage Backends" {
+  class DiskStorage {
+    +base_path: str
+    +total_size: int
+    +compression_ratio: float
+    --
+    +write_file(path, data): bool
+    +read_file(path): bytes
+    +delete_file(path): bool
+    +get_file_size(path): int
+    +calculate_compression(): float
+  }
+  
+  class PostgreSQLStorage {
+    +host: str
+    +port: int
+    +database: str
+    +pool_size: int
+    +partitions: int
+    --
+    +execute_query(sql, params): Result
+    +bulk_insert(table, data): bool
+    +get_table_size(table): int
+    +optimize_tables(): bool
+  }
+}
+
+package "Cache Types" {
+  enum CacheType {
+    SEC_RESPONSE
+    LLM_RESPONSE
+    TECHNICAL_DATA
+    SUBMISSION_DATA
+    COMPANY_FACTS
+    QUARTERLY_METRICS
+  }
+}
+
+' Relationships
+ConfigManager --> CacheManager : configures
+CacheManager --> CacheHandler : manages
+CacheManager --> CacheStats : tracks
+CacheHandler <|-- FileCacheHandler
+CacheHandler <|-- ParquetCacheHandler
+CacheHandler <|-- RDBMSCacheHandler
+
+FileCacheHandler --> DiskStorage : uses
+ParquetCacheHandler --> DiskStorage : uses
+RDBMSCacheHandler --> PostgreSQLStorage : uses
+
+CacheManager --> CacheType : handles
+CacheType --> CacheHandler : routes to
+
+' Cache Type to Handler mappings
+note right of CacheType : SEC_RESPONSE → FileCacheHandler\nLLM_RESPONSE → FileCacheHandler\nCOMPANY_FACTS → FileCacheHandler\nQUARTERLY_METRICS → FileCacheHandler\nTECHNICAL_DATA → ParquetCacheHandler\nSUBMISSION_DATA → ParquetCacheHandler\nAll Types → RDBMSCacheHandler (when enabled)
+
+note right of CacheHandler : Priority determines read order:\nFileCacheHandler: 20\nParquetCacheHandler: 20\nRDBMSCacheHandler: 10\n\nHigher number = Higher priority
+
+note bottom of DiskStorage : Compression:\n- JSON files: gzip level 9\n- Parquet files: gzip + dictionary\n- Typical ratio: 70-80% reduction
+
+note bottom of PostgreSQLStorage : Features:\n- Hash partitioned on CIK (10 partitions)\n- JSONB compression via TOAST\n- Connection pooling\n- Automatic maintenance
+
+@enduml

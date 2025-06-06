@@ -1,0 +1,84 @@
+@startuml llm-architecture-enhanced
+!theme carbon-gray
+title Enhanced LLM Architecture with Apple Silicon Optimization
+
+package "Apple Silicon Mac" {
+  rectangle "M1/M2/M3 Chip" as chip {
+    component "CPU Cores\n(Performance + Efficiency)" as cpu
+    component "GPU Cores\n(Metal Framework)" as gpu
+    component "Neural Engine\n(AI Acceleration)" as neural
+    component "Unified Memory\n(64GB Shared)" as memory
+  }
+  
+  cpu -down-> memory : "Control Flow"
+  gpu -down-> memory : "Matrix Operations"
+  neural -down-> memory : "AI Workloads"
+}
+
+package "InvestiGator System" {
+  component "LLM Processor" as processor {
+    component "Model Capability Detector" as detector
+    component "Context Validator" as validator  
+    component "Memory Estimator" as estimator
+    component "Execution Handler" as handler
+  }
+  
+  component "Ollama Server" as ollama {
+    component "Model Manager" as manager
+    component "Metal Backend" as metal
+    component "Memory Pool" as pool
+  }
+  
+  component "Cache System" as cache {
+    component "LLM Response Cache" as llm_cache
+    component "Model Metadata Cache" as meta_cache
+  }
+}
+
+package "Model Zoo" {
+  component "qwen3-30b-40k\n(30.5B params, 40K context)" as qwen
+  component "llama-3.3-70b\n(70B params, 128K context)" as llama
+  component "phi4-reasoning\n(14B params, 16K context)" as phi
+}
+
+' Connections
+detector -> ollama : "GET /api/show"
+detector -> estimator : "Calculate Requirements"
+estimator -> memory : "Check Available RAM"
+validator -> detector : "Get Context Size"
+handler -> metal : "Execute via Metal"
+metal -> gpu : "GPU Acceleration"
+metal -> neural : "AI Acceleration"
+
+processor -> cache : "Cache Results"
+ollama -> manager : "Load Models"
+manager -> pool : "Allocate Memory"
+manager --> qwen : "Load as needed"
+manager --> llama : "Load as needed"  
+manager --> phi : "Load as needed"
+
+note right of detector
+  **Dynamic Detection:**
+  • Parses PARAMETER num_ctx from modelfile
+  • Extracts context size (4K-128K+)
+  • Calculates memory requirements
+  • Validates system compatibility
+end note
+
+note right of metal
+  **Metal Framework:**
+  • GPU matrix operations
+  • 95%+ CPU idle during inference
+  • Unified memory sharing
+  • Automatic load balancing
+end note
+
+note right of estimator
+  **Memory Intelligence:**
+  • Model: ~0.5GB per billion params (Q4_K)
+  • KV Cache: ~2GB
+  • System Overhead: ~2GB
+  • Total: ~19GB for 30B model
+end note
+
+@enduml

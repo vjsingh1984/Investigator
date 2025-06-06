@@ -1,0 +1,53 @@
+graph TD
+    A[LLM Request] --> B[Model Capability Detector]
+    B --> C{Model in Cache?}
+    C -->|No| D[Query Ollama API /api/show]
+    C -->|Yes| E[Use Cached Capabilities]
+    D --> F[Parse Modelfile for num_ctx]
+    F --> G[Extract Context Size]
+    G --> H[Calculate Memory Requirements]
+    H --> I[Store in Capabilities Cache]
+    E --> J[Context Validator]
+    I --> J
+    
+    J --> K[Calculate Prompt Tokens]
+    K --> L[Calculate Total Requirements]
+    L --> M{Fits in Context?}
+    
+    M -->|Yes| N[Proceed with Execution]
+    M -->|No| O[Generate Warning]
+    O --> P[Adjust num_predict]
+    P --> Q{Still Fits?}
+    Q -->|Yes| N
+    Q -->|No| R[Error: Prompt Too Large]
+    
+    N --> S[Execute via Metal Framework]
+    S --> T[GPU Acceleration]
+    T --> U[Monitor Performance]
+    U --> V[Cache Response]
+    
+    subgraph "Apple Silicon Optimization"
+        T --> W[Metal Framework]
+        W --> X[GPU Cores]
+        W --> Y[Neural Engine]
+        W --> Z[Unified Memory]
+    end
+    
+    subgraph "Context Intelligence"
+        K --> K1[~4 chars per token estimation]
+        L --> L1[Input + Output + Buffer]
+        P --> P1[Reduce output tokens to fit]
+    end
+    
+    subgraph "Memory Management"
+        H --> H1[Model Memory: params × 0.5GB]
+        H --> H2[KV Cache: ~2GB]
+        H --> H3[System Overhead: ~2GB]
+        H --> H4[Check vs Available RAM]
+    end
+    
+    style A fill:#e1f5fe
+    style S fill:#c8e6c9
+    style T fill:#ffecb3
+    style R fill:#ffcdd2
+    style O fill:#fff3e0

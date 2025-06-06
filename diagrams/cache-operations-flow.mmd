@@ -1,0 +1,80 @@
+graph TD
+    subgraph "Application Modules"
+        A[SEC Analysis] 
+        B[Technical Analysis]
+        C[Synthesis Engine]
+        D[Peer Group Analysis]
+    end
+    
+    subgraph "Cache System (Refactored)"
+        CM[Cache Manager<br/>Direct Operations]
+        
+        subgraph "Storage Handlers"
+            FCH[File Cache Handler<br/>Priority: 20]
+            PCH[Parquet Cache Handler<br/>Priority: 15]
+            RCH[RDBMS Cache Handler<br/>Priority: 10]
+        end
+        
+        subgraph "Cache Types"
+            CT1[LLM_RESPONSE]
+            CT2[COMPANY_FACTS]
+            CT3[SEC_RESPONSE]
+            CT4[TECHNICAL_DATA]
+            CT5[SUBMISSION_DATA]
+            CT6[QUARTERLY_METRICS]
+        end
+    end
+    
+    subgraph "Storage Backends"
+        FS[File System<br/>gzip Level 9]
+        PQ[Parquet Files<br/>Columnar Format]
+        DB[PostgreSQL<br/>JSONB Compression]
+    end
+    
+    subgraph "External APIs"
+        SEC[SEC EDGAR API]
+        YF[Yahoo Finance API]
+    end
+    
+    %% Direct cache manager calls (no facade)
+    A -->|cache_manager.get/set/exists| CM
+    B -->|cache_manager.get/set/exists| CM
+    C -->|cache_manager.get/set/exists| CM  
+    D -->|cache_manager.get/set/exists| CM
+    
+    %% Cache manager to handlers
+    CM -->|Priority Order| FCH
+    CM -->|Technical Data Only| PCH
+    CM -->|All Types| RCH
+    
+    %% Handlers to storage
+    FCH --> FS
+    PCH --> PQ
+    RCH --> DB
+    
+    %% Cache miss flows
+    CM -->|Cache Miss| SEC
+    CM -->|Cache Miss| YF
+    
+    %% Cache operations flow
+    CM -->|1. Check Exists| FCH
+    FCH -->|2. Get Data| FS
+    FS -->|3. HIT/MISS| CM
+    CM -->|4. Set on Miss| FCH
+    
+    %% Success/failure tracking
+    CM -->|✅ Cache HIT<br/>⏱️ 0.5-50ms| A
+    CM -->|❌ Cache MISS<br/>📡 API Call| SEC
+    SEC -->|🔄 Auto Cache| CM
+    
+    %% Styling
+    classDef cacheManager fill:#e1f5fe,stroke:#01579b,stroke-width:3px
+    classDef handler fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef storage fill:#e8f5e8,stroke:#1b5e20,stroke-width:2px
+    classDef api fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef removed fill:#ffebee,stroke:#c62828,stroke-width:2px,stroke-dasharray: 5 5
+    
+    class CM cacheManager
+    class FCH,PCH,RCH handler
+    class FS,PQ,DB storage
+    class SEC,YF api

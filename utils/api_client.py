@@ -174,18 +174,18 @@ class BaseAPIClient(ABC):
         """Make GET request"""
         return self._make_request('GET', endpoint, params=params)
     
-    def post(self, endpoint: str, data: Optional[Dict] = None, json: Optional[Dict] = None) -> requests.Response:
+    def post(self, endpoint: str, data: Optional[Dict] = None, json: Optional[Dict] = None, **kwargs) -> requests.Response:
         """Make POST request"""
-        return self._make_request('POST', endpoint, data=data, json=json)
+        return self._make_request('POST', endpoint, data=data, json=json, **kwargs)
     
     def get_json(self, endpoint: str, params: Optional[Dict] = None) -> Dict[str, Any]:
         """Make GET request and return JSON response"""
         response = self.get(endpoint, params=params)
         return response.json()
     
-    def post_json(self, endpoint: str, data: Optional[Dict] = None, json: Optional[Dict] = None) -> Dict[str, Any]:
+    def post_json(self, endpoint: str, data: Optional[Dict] = None, json: Optional[Dict] = None, **kwargs) -> Dict[str, Any]:
         """Make POST request and return JSON response"""
-        response = self.post(endpoint, data=data, json=json)
+        response = self.post(endpoint, data=data, json=json, **kwargs)
         return response.json()
     
     def get_stats(self) -> Dict[str, Any]:
@@ -312,3 +312,198 @@ class OllamaAPIClient(BaseAPIClient):
     def show_model(self, model: str) -> Dict[str, Any]:
         """Show model information"""
         return self.post_json('/api/show', json={'name': model})
+    
+    def get_model_capabilities(self, model: str) -> Dict[str, Any]:
+        """
+        Get model capabilities including context size
+        
+        Returns:
+            Dict containing context_size, parameter_count, etc.
+        """
+        try:
+            model_info = self.show_model(model)
+            
+            # Extract context size from model info
+            # Use model-specific defaults based on known model capabilities
+            context_size = self._get_default_context_size(model)
+            parameter_size = 0
+            
+            # First, check the modelfile for PARAMETER num_ctx
+            if 'modelfile' in model_info:
+                modelfile = model_info['modelfile']
+                if isinstance(modelfile, str):
+                    # Parse PARAMETER num_ctx from modelfile
+                    import re
+                    num_ctx_match = re.search(r'PARAMETER\s+num_ctx\s+(\d+)', modelfile)
+                    if num_ctx_match:
+                        context_size = int(num_ctx_match.group(1))
+                        logger.debug(f"Found num_ctx={context_size} in modelfile for {model}")
+            
+            # Check modelinfo for context window as backup
+            if context_size == 4096 and 'modelinfo' in model_info:
+                modelinfo = model_info['modelinfo']
+                
+                # Parse context length from various possible fields
+                if isinstance(modelinfo, dict):
+                    # Common fields where context size might be stored
+                    context_fields = [
+                        'context_length',
+                        'max_position_embeddings',
+                        'n_ctx',
+                        'max_seq_len',
+                        'context_window'
+                    ]
+                    
+                    for field in context_fields:
+                        if field in modelinfo and isinstance(modelinfo[field], (int, float)):
+                            context_size = int(modelinfo[field])
+                            logger.debug(f"Found {field}={context_size} in modelinfo for {model}")
+                            break
+                    
+                    # Extract parameter count
+                    param_fields = ['num_parameters', 'parameter_count', 'params']
+                    for field in param_fields:
+                        if field in modelinfo and isinstance(modelinfo[field], (int, float, str)):
+                            parameter_size = modelinfo[field]
+                            break
+            
+            # Check model file details for additional info
+            if 'details' in model_info:
+                details = model_info['details']
+                if isinstance(details, dict):
+                    if 'parameter_size' in details:
+                        parameter_size = details['parameter_size']
+                    
+                    # Some models store context in details
+                    if 'context_length' in details:
+                        detected_context = int(details['context_length'])
+                        if detected_context > context_size:  # Use the larger value
+                            context_size = detected_context
+                            logger.debug(f"Found context_length={context_size} in details for {model}")
+            
+            # Extract parameter size from modelfile if available
+            if parameter_size == 0 and 'modelfile' in model_info:
+                modelfile = model_info['modelfile']
+                if isinstance(modelfile, str):
+                    # Look for patterns like "30B", "70B", etc.
+                    import re
+                    param_match = re.search(r'(\d+(?:\.\d+)?)B', model)
+                    if param_match:
+                        parameter_size = f"{param_match.group(1)}B"
+            
+            # Calculate memory requirements if we have parameter size
+            memory_requirements = self._estimate_memory_requirements(parameter_size)
+            
+            return {
+                'model_name': model,
+                'context_size': context_size,
+                'parameter_size': parameter_size,
+                'memory_requirements': memory_requirements,
+                'available': True,
+                'raw_info': model_info
+            }
+            
+        except Exception as e:
+            logger.warning(f"Failed to get capabilities for model {model}: {e}")
+            return {
+                'model_name': model,
+                'context_size': 4096,  # Conservative default
+                'parameter_size': 0,
+                'memory_requirements': {},
+                'available': False,
+                'error': str(e)
+            }
+    
+    def _get_default_context_size(self, model: str) -> int:
+        """Get default context size for known models when Ollama API doesn't provide it"""
+        # Known model context sizes based on model specifications
+        model_contexts = {
+            # Llama 3.1 models have 128K context
+            'llama3.1': 131072,
+            'llama-3.1': 131072,
+            
+            # Llama 3.3 models 
+            'llama3.3': 131072,
+            'llama-3.3': 131072,
+            
+            # Qwen models
+            'qwen2.5:32b': 32768,
+            'qwen3-30b-40k': 40960,
+            'qwen3:30b': 40960,
+            
+            # Phi models
+            'phi4-reasoning:plus': 32768,
+            'phi-4': 16384,
+            'phi3': 4096,
+            
+            # Mixtral models
+            'mixtral-8x7b': 32768,
+            'mixtral:8x7b': 32768,
+            
+            # Mistral models
+            'mistral:7b': 8192,
+            'mistral:latest': 8192,
+        }
+        
+        # Try to match model name with known contexts
+        for model_key, context_size in model_contexts.items():
+            if model_key in model.lower():
+                logger.debug(f"Using known context size {context_size} for model {model}")
+                return context_size
+        
+        # Default fallback
+        logger.warning(f"Unknown model {model}, using conservative 4096 context size")
+        return 4096
+    
+    def _estimate_memory_requirements(self, parameter_size) -> Dict[str, Any]:
+        """Estimate memory requirements for a model"""
+        if not parameter_size:
+            return {}
+        
+        try:
+            # Extract numeric value from parameter size string
+            import re
+            if isinstance(parameter_size, str):
+                match = re.search(r'(\d+(?:\.\d+)?)', str(parameter_size))
+                if match:
+                    params_b = float(match.group(1))
+                else:
+                    return {}
+            else:
+                params_b = float(parameter_size) / 1e9  # Convert to billions
+            
+            # Estimate memory requirements (rough calculations)
+            # Q4_K quantization uses ~4 bits per parameter on average
+            # Plus overhead for KV cache, activations, etc.
+            model_memory_gb = params_b * 0.5  # ~4 bits per param in GB
+            kv_cache_gb = 2.0  # Estimate for KV cache
+            overhead_gb = 2.0  # OS and other overhead
+            
+            total_estimated_gb = model_memory_gb + kv_cache_gb + overhead_gb
+            
+            # Get system memory
+            try:
+                import subprocess
+                result = subprocess.run(['sysctl', 'hw.memsize'], capture_output=True, text=True)
+                if result.returncode == 0:
+                    system_memory_bytes = int(result.stdout.split(': ')[1])
+                    system_memory_gb = system_memory_bytes / (1024**3)
+                else:
+                    system_memory_gb = 64  # Default assumption
+            except:
+                system_memory_gb = 64  # Default assumption
+            
+            memory_sufficient = total_estimated_gb <= (system_memory_gb * 0.8)  # Leave 20% buffer
+            
+            return {
+                'model_memory_gb': round(model_memory_gb, 1),
+                'kv_cache_gb': kv_cache_gb,
+                'total_estimated_gb': round(total_estimated_gb, 1),
+                'system_memory_gb': round(system_memory_gb, 1),
+                'memory_sufficient': memory_sufficient,
+                'utilization_percent': round((total_estimated_gb / system_memory_gb) * 100, 1)
+            }
+            
+        except Exception as e:
+            logger.debug(f"Error estimating memory requirements: {e}")
+            return {}

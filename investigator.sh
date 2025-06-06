@@ -132,7 +132,19 @@ show_banner() {
     echo -e "${CYAN}"
     echo "╔══════════════════════════════════════════════════════════════════════════════╗"
     echo "║                                                                              ║"
-    echo "║                              🎩     📊                                       ║"
+    echo "║   ██████╗ ███╗   ██╗██╗   ██╗███████╗███████╗████████╗██╗ ██████╗  █████╗████████╗  ║"
+    echo "║   ██╔══██╗████╗  ██║██║   ██║██╔════╝██╔════╝╚══██╔══╝██║██╔════╝ ██╔══██╚══██╔══╝  ║"
+    echo "║   ██║  ██║██╔██╗ ██║██║   ██║█████╗  ███████╗   ██║   ██║██║  ███╗███████║  ██║     ║"
+    echo "║   ██║  ██║██║╚████║╚██╗ ██╔╝██╔══╝  ╚════██║   ██║   ██║██║   ██║██╔══██║  ██║     ║"
+    echo "║   ██████╔╝██║ ╚███║ ╚████╔╝ ███████╗███████║   ██║   ██║╚██████╔╝██║  ██║  ██║     ║"
+    echo "║   ╚═════╝ ╚═╝  ╚══╝  ╚═══╝  ╚══════╝╚══════╝   ╚═╝   ╚═╝ ╚═════╝ ╚═╝  ╚═╝  ╚═╝     ║"
+    echo "║                                                                              ║"
+    echo "║                            🐊 InvestiGator AI v1.0.0 🤓                             ║"
+    echo "║                                                                              ║"
+    echo "║                  Professional Investment Analysis                            ║"
+    echo "║               Making Smart Investing Accessible to All                       ║"
+    echo "║                                                                              ║"
+    echo "║           Copyright (c) 2025 Vijaykumar Singh           Licensed under Apache License 2.0     ║"
     echo "║                             ╱ o ╲ ╱ o ╲                                      ║"
     echo "║                             ╲   ◡   ╱                                        ║"
     echo "║                              ╲═══╱                                           ║"
@@ -154,11 +166,15 @@ activate_python_env() {
         log_info "Activating Python virtual environment: ${PYTHON_ENV}"
         # shellcheck source=/dev/null
         source "${PYTHON_ENV}/bin/activate"
+        # Prevent Python from generating .pyc files and __pycache__ directories
+        export PYTHONDONTWRITEBYTECODE=1
         log_debug "Python environment activated successfully"
     else
         log_warn "Python virtual environment not found at ${PYTHON_ENV}"
         log_warn "Using system Python - this may cause dependency issues"
         log_warn "Run './scripts/setup.sh' to create proper environment"
+        # Set the same environment variable even when using system Python
+        export PYTHONDONTWRITEBYTECODE=1
     fi
 }
 
@@ -472,13 +488,13 @@ ensure_sec_submissions() {
 import sys
 sys.path.append('.')
 try:
-    from utils.db import DatabaseManager, get_all_submission_store_dao
+    from utils.db import DatabaseManager, get_sec_submissions_dao
     from sqlalchemy import text
     
     symbols = '${symbols[*]}'.split()
     
     db = DatabaseManager()
-    dao = get_all_submission_store_dao()
+    dao = get_sec_submissions_dao()
     
     missing_symbols = []
     for symbol in symbols:
@@ -509,19 +525,25 @@ except Exception as e:
 # Enhanced SEC fundamental analysis execution
 run_sec_analysis() {
     local symbol="$1"
-    local log_file="${LOG_DIR}/sec_fundamental_${symbol,,}_$(date +%Y%m%d_%H%M%S).log"
+    local mode="${2:-comprehensive}"  # Default to comprehensive mode
+    local log_file="${LOG_DIR}/${symbol}.log"
     
     # Set symbol context for logging
     set_symbol_context "${symbol}"
     
-    log_step "🔍 Starting SEC fundamental analysis for ${symbol}..."
+    log_step "🔍 Starting SEC fundamental analysis for ${symbol} (${mode} mode)..."
     
     activate_python_env
     
     local start_time
     start_time=$(date +%s)
     
-    if timeout 1800 python3 sec_fundamental.py --symbol "${symbol}" > "${log_file}" 2>&1; then
+    local sec_command="python3 sec_fundamental.py --symbol ${symbol}"
+    if [[ "${mode}" == "quarterly" ]]; then
+        sec_command="${sec_command} --skip-comprehensive"
+    fi
+    
+    if timeout 1800 ${sec_command} >> "${log_file}" 2>&1; then
         local end_time
         end_time=$(date +%s)
         local duration=$((end_time - start_time))
@@ -551,7 +573,7 @@ run_sec_analysis() {
 # Enhanced Yahoo technical analysis execution
 run_technical_analysis() {
     local symbol="$1"
-    local log_file="${LOG_DIR}/yahoo_technical_${symbol,,}_$(date +%Y%m%d_%H%M%S).log"
+    local log_file="${LOG_DIR}/${symbol}.log"
     
     # Set symbol context for logging
     set_symbol_context "${symbol}"
@@ -563,7 +585,7 @@ run_technical_analysis() {
     local start_time
     start_time=$(date +%s)
     
-    if timeout 900 python3 yahoo_technical.py --symbol "${symbol}" > "${log_file}" 2>&1; then
+    if timeout 900 python3 yahoo_technical.py --symbol "${symbol}" >> "${log_file}" 2>&1; then
         local end_time
         end_time=$(date +%s)
         local duration=$((end_time - start_time))
@@ -593,19 +615,26 @@ run_technical_analysis() {
 # Enhanced analysis synthesis execution
 run_synthesis() {
     local symbol="$1"
-    local log_file="${LOG_DIR}/synthesizer_${symbol,,}_$(date +%Y%m%d_%H%M%S).log"
+    local report_flag="${2:-}"
+    local mode="${3:-comprehensive}"  # Default to comprehensive mode
+    local log_file="${LOG_DIR}/${symbol}.log"
     
     # Set symbol context for logging
     set_symbol_context "${symbol}"
     
-    log_step " Starting analysis synthesis for ${symbol}..."
+    log_step " Starting analysis synthesis for ${symbol} (${mode} mode)..."
     
     activate_python_env
     
     local start_time
     start_time=$(date +%s)
     
-    if timeout 300 python3 synthesizer.py --symbol "${symbol}" --report > "${log_file}" 2>&1; then
+    local synthesis_command="python3 synthesizer.py --symbol ${symbol} --synthesis-mode ${mode}"
+    if [[ "${report_flag}" == "true" ]]; then
+        synthesis_command="${synthesis_command} --report"
+    fi
+    
+    if timeout 300 ${synthesis_command} >> "${log_file}" 2>&1; then
         local end_time
         end_time=$(date +%s)
         local duration=$((end_time - start_time))
@@ -635,13 +664,15 @@ run_synthesis() {
 # Comprehensive single stock analysis with detailed progress tracking
 analyze_stock() {
     local symbol="$1"
+    local report_flag="${2:-false}"
+    local mode="${3:-comprehensive}"  # Default to comprehensive mode
     local start_time
     start_time=$(date +%s)
     
     # Set symbol context for overall analysis logging
     set_symbol_context "${symbol}"
     
-    log_info " Starting comprehensive analysis pipeline for ${symbol}"
+    log_info " Starting ${mode} analysis pipeline for ${symbol}"
     printf "${WHITE}%0.s=" {1..80}
     echo -e "${NC}"
     
@@ -658,7 +689,7 @@ analyze_stock() {
     local step_start
     step_start=$(date +%s)
     
-    if run_sec_analysis "${symbol}"; then
+    if run_sec_analysis "${symbol}" "${mode}"; then
         local step_duration=$(($(date +%s) - step_start))
         step_times+=("SEC: ${step_duration}s")
         echo -e "${GREEN} SEC Analysis: ${step_duration}s${NC}"
@@ -684,7 +715,7 @@ analyze_stock() {
     echo -e "${BLUE}Step 3/3: Investment Synthesis${NC}"
     step_start=$(date +%s)
     
-    if run_synthesis "${symbol}"; then
+    if run_synthesis "${symbol}" "${report_flag}" "${mode}"; then
         local step_duration=$(($(date +%s) - step_start))
         step_times+=("Synthesis: ${step_duration}s")
         echo -e "${GREEN} Investment Synthesis: ${step_duration}s${NC}"
@@ -710,7 +741,6 @@ analyze_stock() {
         SUCCESSFUL_ANALYSES=$((SUCCESSFUL_ANALYSES+1))
         
         # Display quick results if available
-        display_quick_results "${symbol}"
         
         clear_symbol_context
         return 0
@@ -726,40 +756,17 @@ analyze_stock() {
     fi
 }
 
-# Display quick analysis results
-display_quick_results() {
-    local symbol="$1"
-    
-    activate_python_env
-    
-    python3 -c "
-import sys
-sys.path.append('.')
-try:
-    from utils.db import get_stock_analysis_dao
-    dao = get_stock_analysis_dao()
-    analysis = dao.get_analysis('${symbol}')
-    if analysis:
-        print(f' Quick Results for ${symbol}:')
-        print(f'   Overall Score: {analysis.get(\"overall_score\", \"N/A\")}/10')
-        print(f'   Recommendation: {analysis.get(\"recommendation\", \"N/A\")}')
-        if analysis.get('price_target'):
-            print(f'   Price Target: \${analysis[\"price_target\"]:.2f}')
-        if analysis.get('current_price'):
-            print(f'   Current Price: \${analysis[\"current_price\"]:.2f}')
-except Exception:
-    pass
-" 2>/dev/null || true
-}
-
 # Enhanced batch analysis
 run_batch_analysis() {
+    local report_flag="${1:-false}"
+    local mode="${2:-comprehensive}"
+    shift 2
     local symbols=("$@")
     TOTAL_STOCKS=${#symbols[@]}
     local batch_start_time
     batch_start_time=$(date +%s)
     
-    log_info " Starting batch analysis for ${TOTAL_STOCKS} stocks: ${symbols[*]}"
+    log_info " Starting batch analysis for ${TOTAL_STOCKS} stocks (${mode} mode): ${symbols[*]}"
     echo -e "${CYAN}════════════════════════════════════════════════════════════════════════════════${NC}"
     
     # Ensure ticker mappings are loaded before analysis
@@ -782,7 +789,7 @@ run_batch_analysis() {
         echo "╚════════════════════════════════════════════════════════════════════════════════╝"
         echo -e "${NC}"
         
-        analyze_stock "${symbol^^}"
+        analyze_stock "${symbol^^}" "${report_flag}" "${synthesis_mode}"
         
         # Brief pause between stocks to prevent overwhelming the system
         if [[ ${current_stock} -lt ${TOTAL_STOCKS} ]]; then
@@ -1225,7 +1232,7 @@ try:
     if db.test_connection():
         with db.get_session() as session:
             # Get table sizes
-            tables = ['stock_analysis', 'sec_filings', 'technical_indicators', 'analysis_reports']
+            tables = [ 'technical_indicators']
             for table in tables:
                 try:
                     result = session.execute(f'SELECT COUNT(*) FROM {table}').scalar()
@@ -1272,59 +1279,61 @@ ${YELLOW}USAGE:${NC}
 ${YELLOW}STOCK ANALYSIS OPTIONS:${NC}
     --symbol SYMBOL              Analyze single stock (complete pipeline)
     --symbols SYMBOL1 SYMBOL2    Analyze multiple stocks (batch mode)
+    --risk-assessment            Include comprehensive risk assessment in analysis
+    --weekly-report              Generate weekly portfolio report
+    --report                     Generate PDF report for analyzed symbols
+    --synthesis-mode MODE        Synthesis approach: 'comprehensive' (default) or 'quarterly'
+                                 comprehensive: Uses comprehensive analysis + technical analysis
+                                 quarterly: Uses all quarterly analyses + technical analysis
 
-${YELLOW}REPORTING OPTIONS:${NC}
-    --weekly-report              Generate comprehensive weekly PDF report
-    --send-email                 Send report via email (use with --weekly-report)
+${YELLOW}PEER GROUP ANALYSIS:${NC}
+    --peer-groups-comprehensive  Generate comprehensive peer group report with all symbols, comparisons, and charts
+    --peer-sector SECTOR         Target specific sector (financials, technology, healthcare)
+    --peer-industry INDUSTRY     Target specific industry within sector
+    --peer-risk-assessment       Include risk assessment in peer group analysis
 
-${YELLOW}AUTOMATION OPTIONS:${NC}
-    --start-scheduler           Start automated scheduler (weekly reports)
-
-${YELLOW}SYSTEM OPTIONS:${NC}
-    --test-system               Run comprehensive system tests
-    --system-stats              Display system performance statistics
-    --clean-cache               Clean cache for specified symbols (requires --symbol/--symbols)
+${YELLOW}CACHE MANAGEMENT:${NC}
+    --clean-cache               Clean cache for specified symbols (use with --symbol/--symbols)
     --clean-cache-all           Clean all caches completely
-    --clean-cache-disk          Clean disk cache only
-    --clean-cache-db            Clean database cache only
-    --inspect-cache             Inspect cache contents (optionally for specific symbols)
-    --cache-sizes               Show cache sizes and statistics
-    --force-refresh             Force refresh cache for specified symbols
-    --test-cache                Run cache system tests
-    --run-tests [mode]          Run test suite (unit|integration|coverage|all)
-    --setup-system              Run automated system setup
-    --setup-database             Setup PostgreSQL database and schema
-    --generate-docs [format]     Generate documentation (html|pdf)
-    --config FILE               Use alternative configuration file
+    --force-refresh             Force refresh data (bypass cache)
+
+${YELLOW}SYSTEM:${NC}
+    --setup-system              Install dependencies and setup environment
+    --setup-database            Setup database (run after --setup-system)
+    --setup-vectordb            Initialize vector database (RocksDB + FAISS, Apple Silicon optimized)
+    --test-system               Run system tests
     --debug                     Enable debug logging
     --help                      Show this help message
 
 ${YELLOW}EXAMPLES:${NC}
     ${GREEN}# Analyze single stock${NC}
     $0 --symbol AAPL
+    $0 --symbol AAPL --risk-assessment
     
     ${GREEN}# Analyze multiple stocks${NC}
-    $0 --symbols AAPL GOOGL MSFT AMZN TSLA
+    $0 --symbols AAPL GOOGL MSFT
+    $0 --symbols AAPL GOOGL MSFT --risk-assessment
     
-    ${GREEN}# Clean cache for specific symbols${NC}
+    ${GREEN}# Generate reports${NC}
+    $0 --symbol AAPL --report
+    $0 --weekly-report
+    
+    ${GREEN}# Comprehensive peer group analysis${NC}
+    $0 --peer-groups-comprehensive
+    $0 --peer-groups-comprehensive --peer-sector financials
+    $0 --peer-groups-comprehensive --peer-sector technology --peer-industry software_infrastructure
+    $0 --peer-groups-comprehensive --peer-risk-assessment
+    
+    ${GREEN}# Cache management${NC}
     $0 --clean-cache --symbol AAPL
-    $0 --clean-cache --symbols AAPL MSFT GOOGL
+    $0 --clean-cache-all
+    $0 --symbol AAPL --force-refresh
     
-    ${GREEN}# Cache management operations${NC}
-    $0 --clean-cache-all         # Clean all caches
-    $0 --inspect-cache           # Inspect all cache contents
-    $0 --inspect-cache --symbol AAPL  # Inspect cache for AAPL
-    $0 --cache-sizes             # Show cache sizes
-    $0 --force-refresh --symbol AAPL   # Force refresh AAPL data
-    
-    ${GREEN}# Generate and email comprehensive weekly report${NC}
-    $0 --weekly-report --send-email
-    
-    ${GREEN}# Start automated scheduler for hands-free operation${NC}
-    $0 --start-scheduler
-    
-    ${GREEN}# Run complete system diagnostics${NC}
-    $0 --test-system
+    ${GREEN}# System setup and testing${NC}
+    $0 --setup-system               # Install all dependencies
+    $0 --setup-database             # Setup PostgreSQL database
+    $0 --setup-vectordb             # Initialize vector database
+    $0 --test-system                # Run comprehensive tests
 
 ${YELLOW}ANALYSIS PIPELINE:${NC}
     ${BLUE}1. SEC Fundamental Analysis${NC}     - Downloads 10-K filings, AI analysis
@@ -1401,6 +1410,7 @@ main() {
     local symbols=()
     local weekly_report=false
     local send_email=false
+    local generate_report=false
     local start_scheduler_flag=false
     local test_system_flag=false
     local show_stats=false
@@ -1416,9 +1426,17 @@ main() {
     local test_mode="all"
     local setup_system=false
     local setup_database=false
+    local setup_vectordb=false
     local generate_docs=false
     local docs_format="html"
     local config_file="${CONFIG_FILE}"
+    local peer_groups_analysis=false
+    local peer_groups_reports=false
+    local peer_groups_fast=false
+    local peer_groups_comprehensive=false
+    local peer_sector=""
+    local peer_industry=""
+    local synthesis_mode="comprehensive"  # comprehensive (default) or quarterly
     
     # Parse command line arguments
     while [[ $# -gt 0 ]]; do
@@ -1441,6 +1459,10 @@ main() {
                 ;;
             --weekly-report)
                 weekly_report=true
+                shift
+                ;;
+            --report)
+                generate_report=true
                 shift
                 ;;
             --send-email)
@@ -1520,6 +1542,10 @@ main() {
                 setup_database=true
                 shift
                 ;;
+            --setup-vectordb)
+                setup_vectordb=true
+                shift
+                ;;
             --generate-docs)
                 generate_docs=true
                 if [[ -n "${2:-}" && ! "$2" =~ ^-- ]]; then
@@ -1528,6 +1554,54 @@ main() {
                 else
                     shift
                 fi
+                ;;
+            --peer-groups-analysis)
+                peer_groups_analysis=true
+                shift
+                ;;
+            --peer-groups-reports)
+                peer_groups_reports=true
+                shift
+                ;;
+            --peer-groups-fast)
+                peer_groups_fast=true
+                shift
+                ;;
+            --peer-groups-comprehensive)
+                peer_groups_comprehensive=true
+                shift
+                ;;
+            --peer-sector)
+                if [[ -z "${2:-}" ]]; then
+                    log_error "Option --peer-sector requires a sector name"
+                    show_usage
+                    exit 1
+                fi
+                peer_sector="$2"
+                shift 2
+                ;;
+            --peer-industry)
+                if [[ -z "${2:-}" ]]; then
+                    log_error "Option --peer-industry requires an industry name"
+                    show_usage
+                    exit 1
+                fi
+                peer_industry="$2"
+                shift 2
+                ;;
+            --synthesis-mode)
+                if [[ -z "${2:-}" ]]; then
+                    log_error "Option --synthesis-mode requires a mode (comprehensive or quarterly)"
+                    show_usage
+                    exit 1
+                fi
+                if [[ "$2" != "comprehensive" && "$2" != "quarterly" ]]; then
+                    log_error "Synthesis mode must be 'comprehensive' or 'quarterly'"
+                    show_usage
+                    exit 1
+                fi
+                synthesis_mode="$2"
+                shift 2
                 ;;
             --help)
                 show_usage
@@ -1833,7 +1907,11 @@ with open('temp_refresh_config.json', 'w') as f:
         
         # Install system dependencies
         log_info "📦 Installing system dependencies..."
-        brew install postgresql@14 python@3.9 git 2>/dev/null || log_warn "Some packages may already be installed"
+        brew install postgresql@14 python@3.11 git cmake pkg-config libomp 2>/dev/null || log_warn "Some packages may already be installed"
+        
+        # Install Python build dependencies for vector database
+        log_info "📦 Installing build dependencies for vector database..."
+        brew install rocksdb sqlite3 2>/dev/null || log_warn "Some packages may already be installed"
         
         # Create Python virtual environment
         if [[ ! -d "${PYTHON_ENV}" ]]; then
@@ -1846,6 +1924,26 @@ with open('temp_refresh_config.json', 'w') as f:
         activate_python_env
         pip install --upgrade pip
         pip install -r requirements.txt
+        
+        # Install vector database dependencies with Apple Silicon optimization
+        log_info "📦 Installing vector database dependencies..."
+        
+        # Install FAISS with Apple Silicon detection
+        if [[ "$(uname -m)" == "arm64" ]]; then
+            log_info "🍎 Detected Apple Silicon - optimizing FAISS installation..."
+            if command -v conda &> /dev/null; then
+                log_info "Using conda for better Apple Silicon support..."
+                conda install -c pytorch faiss-cpu -y || pip install faiss-cpu
+            else
+                log_info "Installing via pip (consider conda for better Apple Silicon performance)..."
+                pip install faiss-cpu
+            fi
+        else
+            pip install faiss-cpu
+        fi
+        
+        # Install other dependencies
+        pip install sentence-transformers python-rocksdb || log_warn "Some vector database dependencies failed - install manually if needed"
         
         # Install Ollama if not present
         if ! command -v ollama &> /dev/null; then
@@ -1861,7 +1959,9 @@ with open('temp_refresh_config.json', 'w') as f:
         log_info "🔄 Next steps:"
         log_info "   1. Configure config.json with your settings"
         log_info "   2. Run: ./investigator.sh --setup-database"
-        log_info "   3. Download AI models: ollama pull phi4-reasoning:plus"
+        log_info "   3. Run: ./investigator.sh --setup-vectordb (optional)"
+        log_info "   4. Download AI models: ollama pull llama3.3:70b"
+        log_info "   5. Test system: ./investigator.sh --test-system"
         exit 0
     fi
     
@@ -1877,25 +1977,25 @@ with open('temp_refresh_config.json', 'w') as f:
         
         # Read database config
         activate_python_env
-        DB_NAME=$(python -c "from config import get_config; print(get_config().database.database)" 2>/dev/null || echo "investment_analysis")
-        DB_USER=$(python -c "from config import get_config; print(get_config().database.username)" 2>/dev/null || echo "investment_ai")
+        DB_NAME=$(python -c "from config import get_config; print(get_config().database.database)" 2>/dev/null || echo "investment_ai")
+        DB_USER=$(python -c "from config import get_config; print(get_config().database.username)" 2>/dev/null || echo "investment_user")
         DB_PASS=$(python -c "from config import get_config; print(get_config().database.password)" 2>/dev/null || echo "investment_pass")
         
         log_info "📊 Database: ${DB_NAME}"
         log_info "👤 User: ${DB_USER}"
         
-        # Create database if it doesn't exist
-        if ! psql -lqt | cut -d \| -f 1 | grep -qw "${DB_NAME}"; then
-            log_info "🏗️ Creating database ${DB_NAME}..."
-            createdb "${DB_NAME}"
-        fi
-        
-        # Create user if it doesn't exist
-        if ! psql -tc "SELECT 1 FROM pg_user WHERE usename = '${DB_USER}'" | grep -q 1; then
+        # 1. Create the user if not exists
+        if ! psql -h localhost -d postgres -tc "SELECT 1 FROM pg_user WHERE usename = '${DB_USER}'" | grep -q 1; then
             log_info "👤 Creating user ${DB_USER}..."
-            psql -c "CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASS}';"
+            psql -h localhost -d postgres -c "CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASS}';"
         fi
-        
+
+        # 2. Create the database, owned by the user
+        if ! psql -h localhost -d postgres -lqt | cut -d \| -f 1 | grep -qw "${DB_NAME}"; then
+            log_info "🏗️ Creating database ${DB_NAME} owned by ${DB_USER}..."
+            createdb -O "${DB_USER}" "${DB_NAME}"
+        fi
+ 
         # Grant permissions
         log_info "🔐 Setting up permissions..."
         psql -d "${DB_NAME}" -c "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};"
@@ -1906,7 +2006,7 @@ with open('temp_refresh_config.json', 'w') as f:
         # Initialize database schema
         if [[ -f "schema/consolidated_schema.sql" ]]; then
             log_info "📋 Loading database schema..."
-            psql -U "${DB_USER}" -d "${DB_NAME}" -f schema/consolidated_schema.sql
+            psql -U "${USER}" -h localhost -d "${DB_NAME}" -f schema/consolidated_schema.sql
         else
             log_warn "⚠️ No schema file found at schema/consolidated_schema.sql"
         fi
@@ -1919,6 +2019,148 @@ with open('temp_refresh_config.json', 'w') as f:
             log_error "❌ Database connection test failed"
             exit 1
         fi
+        exit 0
+    fi
+    
+    if [[ "${setup_vectordb}" == "true" ]]; then
+        log_info "🔤 Setting up Vector Database (RocksDB + FAISS)..."
+        
+        # Activate Python environment
+        activate_python_env
+        
+        # Check if vector database dependencies are installed
+        log_info "🔍 Checking vector database dependencies..."
+        
+        # Check FAISS with Apple Silicon optimization
+        if ! python -c "import faiss" 2>/dev/null; then
+            log_info "📦 Installing FAISS..."
+            
+            if [[ "$(uname -m)" == "arm64" ]]; then
+                log_info "🍎 Apple Silicon detected - using optimized installation..."
+                if command -v conda &> /dev/null; then
+                    log_info "Installing FAISS via conda (recommended for Apple Silicon)..."
+                    conda install -c pytorch faiss-cpu -y || pip install faiss-cpu || {
+                        log_error "❌ Failed to install FAISS. Try manually: conda install -c pytorch faiss-cpu"
+                        exit 1
+                    }
+                else
+                    log_info "Installing FAISS via pip (consider conda for better performance)..."
+                    pip install faiss-cpu || {
+                        log_error "❌ Failed to install FAISS. Try manually: pip install faiss-cpu"
+                        log_info "💡 For better Apple Silicon performance, install conda and use: conda install -c pytorch faiss-cpu"
+                        exit 1
+                    }
+                fi
+            else
+                pip install faiss-cpu || {
+                    log_error "❌ Failed to install FAISS. Try manually: pip install faiss-cpu"
+                    exit 1
+                }
+            fi
+        else
+            log_success "✅ FAISS already installed"
+        fi
+        
+        # Check SentenceTransformers
+        if ! python -c "import sentence_transformers" 2>/dev/null; then
+            log_info "📦 Installing SentenceTransformers..."
+            pip install sentence-transformers || {
+                log_error "❌ Failed to install SentenceTransformers. Try manually: pip install sentence-transformers"
+                exit 1
+            }
+        else
+            log_success "✅ SentenceTransformers already installed"
+        fi
+        
+        # Check RocksDB
+        if ! python -c "import rocksdb" 2>/dev/null; then
+            log_info "📦 Installing python-rocksdb..."
+            # Set environment variables for RocksDB compilation
+            export ROCKSDB_PATH=/opt/homebrew
+            pip install python-rocksdb || {
+                log_warn "⚠️ Failed to install python-rocksdb via pip. Trying alternative method..."
+                # Try building from source with explicit paths
+                pip install python-rocksdb --no-cache-dir --force-reinstall || {
+                    log_error "❌ Failed to install python-rocksdb. Vector database will use fallback storage."
+                    log_info "💡 To fix: brew install rocksdb && pip install python-rocksdb"
+                }
+            }
+        else
+            log_success "✅ python-rocksdb already installed"
+        fi
+        
+        # Create vector database directories
+        log_info "📁 Creating vector database directories..."
+        mkdir -p data/vector_db/rocksdb
+        mkdir -p data/vector_db/faiss_indexes
+        mkdir -p data/vector_db/embeddings
+        
+        # Test vector database functionality
+        log_info "🧪 Testing vector database functionality..."
+        if python test_vector_db.py > logs/vector_db_setup.log 2>&1; then
+            log_success "✅ Vector database test successful!"
+        else
+            log_warn "⚠️ Vector database test had some issues. Check logs/vector_db_setup.log"
+            log_info "💡 Some failures may be due to missing optional dependencies"
+        fi
+        
+        # Initialize default embedding model
+        log_info "🧠 Downloading default embedding model (all-MiniLM-L6-v2)..."
+        python -c "
+from sentence_transformers import SentenceTransformer
+import logging
+logging.getLogger('sentence_transformers').setLevel(logging.WARNING)
+try:
+    model = SentenceTransformer('all-MiniLM-L6-v2')
+    print('✅ Default embedding model downloaded successfully')
+except Exception as e:
+    print(f'⚠️ Failed to download embedding model: {e}')
+" || log_warn "⚠️ Failed to download default embedding model"
+        
+        # Enable vector database in config
+        log_info "⚙️ Updating configuration to enable vector database..."
+        python -c "
+import json
+import os
+config_file = 'config.json'
+if os.path.exists(config_file):
+    with open(config_file, 'r') as f:
+        config = json.load(f)
+    
+    if 'vector_db' not in config:
+        config['vector_db'] = {}
+    
+    config['vector_db']['enabled'] = True
+    config['vector_db']['db_path'] = 'data/vector_db'
+    config['vector_db']['embedding_model'] = 'all-MiniLM-L6-v2'
+    
+    with open(config_file, 'w') as f:
+        json.dump(config, f, indent=2)
+    
+    print('✅ Configuration updated to enable vector database')
+else:
+    print('⚠️ config.json not found. Vector database disabled by default.')
+" || log_warn "⚠️ Failed to update configuration"
+        
+        # Run data collector test
+        log_info "🧪 Testing data collector with vector database..."
+        if python test_data_collector.py > logs/data_collector_setup.log 2>&1; then
+            log_success "✅ Data collector test successful!"
+        else
+            log_warn "⚠️ Data collector test had some issues. Check logs/data_collector_setup.log"
+        fi
+        
+        log_success "✅ Vector database setup completed!"
+        log_info "🔄 Vector database features enabled:"
+        log_info "   • Semantic search for SEC filings and narratives"
+        log_info "   • Event extraction from 8-K forms"
+        log_info "   • Russell 1000 staggered refresh strategy"
+        log_info "   • Submission-driven data collection"
+        log_info ""
+        log_info "📊 Next steps:"
+        log_info "   1. Test the system: ./investigator.sh --test-system"
+        log_info "   2. Run analysis: ./investigator.sh --symbol AAPL"
+        log_info "   3. Check vector database: python test_vector_db.py"
         exit 0
     fi
     
@@ -2215,6 +2457,86 @@ EOF
         exit 0
     fi
     
+    # Handle peer group analysis options
+    if [[ "${peer_groups_analysis}" == "true" ]]; then
+        log_info "🔍 Running comprehensive peer group analysis..."
+        activate_python_env
+        
+        # Build command with optional sector/industry filters
+        local cmd="python3 ${SCRIPT_DIR}/run_major_peer_groups_comprehensive.py"
+        if [[ -n "${peer_sector}" ]]; then
+            cmd="${cmd} --sector ${peer_sector}"
+        fi
+        if [[ -n "${peer_industry}" ]]; then
+            cmd="${cmd} --industry ${peer_industry}"
+        fi
+        
+        if eval "${cmd}"; then
+            log_success "✅ Peer group analysis completed successfully"
+            exit 0
+        else
+            log_error "❌ Peer group analysis failed"
+            exit 1
+        fi
+    fi
+    
+    if [[ "${peer_groups_fast}" == "true" ]]; then
+        log_info "⚡ Running fast peer group analysis (synthesis only)..."
+        activate_python_env
+        
+        # Build command with optional sector/industry filters
+        local cmd="python3 ${SCRIPT_DIR}/run_major_peer_groups_fast.py"
+        if [[ -n "${peer_sector}" ]]; then
+            cmd="${cmd} --sector ${peer_sector}"
+        fi
+        if [[ -n "${peer_industry}" ]]; then
+            cmd="${cmd} --industry ${peer_industry}"
+        fi
+        
+        if eval "${cmd}"; then
+            log_success "✅ Fast peer group analysis completed successfully"
+            exit 0
+        else
+            log_error "❌ Fast peer group analysis failed"
+            exit 1
+        fi
+    fi
+    
+    if [[ "${peer_groups_reports}" == "true" ]]; then
+        log_info "📄 Generating PDF reports for peer group analysis..."
+        activate_python_env
+        if python3 "${SCRIPT_DIR}/generate_peer_group_reports.py"; then
+            log_success "✅ Peer group PDF reports generated successfully"
+            exit 0
+        else
+            log_error "❌ Peer group report generation failed"
+            exit 1
+        fi
+    fi
+    
+    if [[ "${peer_groups_comprehensive}" == "true" ]]; then
+        log_info "📊 Generating comprehensive peer group report..."
+        activate_python_env
+        local cmd="python3 ${SCRIPT_DIR}/generate_comprehensive_peer_group_report.py"
+        
+        # Add sector/industry filters if specified
+        if [[ -n "${peer_sector}" ]]; then
+            cmd="${cmd} --sector ${peer_sector}"
+        fi
+        if [[ -n "${peer_industry}" ]]; then
+            cmd="${cmd} --industry ${peer_industry}"
+        fi
+        
+        log_debug "Executing: ${cmd}"
+        if eval "${cmd}"; then
+            log_success "✅ Comprehensive peer group report generated successfully"
+            exit 0
+        else
+            log_error "❌ Comprehensive peer group report generation failed"
+            exit 1
+        fi
+    fi
+
     # Check prerequisites for analysis operations
     if [[ "${weekly_report}" == "true" || ${#symbols[@]} -gt 0 ]]; then
         if ! check_prerequisites; then
@@ -2257,7 +2579,7 @@ except Exception as e:
         # Run batch analysis for weekly report
         if [[ ${#symbols[@]} -gt 0 ]]; then
             log_info " Running batch analysis for weekly report..."
-            run_batch_analysis "${symbols[@]}"
+            run_batch_analysis "false" "${synthesis_mode}" "${symbols[@]}"
         fi
         
         # Generate and optionally email the report
@@ -2269,11 +2591,11 @@ except Exception as e:
         if [[ ${#symbols[@]} -eq 1 ]]; then
             # Single stock analysis
             log_info " Single stock analysis mode"
-            analyze_stock "${symbols[0]^^}"
+            analyze_stock "${symbols[0]^^}" "${generate_report}" "${synthesis_mode}"
         else
             # Batch analysis
             log_info " Batch analysis mode"
-            run_batch_analysis "${symbols[@]}"
+            run_batch_analysis "${generate_report}" "${synthesis_mode}" "${symbols[@]}"
         fi
         exit $?
     fi

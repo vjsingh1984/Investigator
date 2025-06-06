@@ -10,12 +10,16 @@ Enhanced with cache manager integration for better control
 """
 
 import os
+import sys
 import shutil
 import logging
 from pathlib import Path
 from typing import List, Optional
 import psycopg2
 from psycopg2 import sql
+
+# Add parent directory to path to allow imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config import get_config
 from utils.cache.cache_manager import get_cache_manager
@@ -86,18 +90,15 @@ class CacheCleanup:
             symbol: If provided, only delete records for this symbol
         """
         if tables is None:
+            # Only include tables that are actually used by the application
             tables = [
-                "sec_response_store",
-                "llm_response_store",
-                "all_submission_store",
-                "all_companyfacts_store",
-                "quarterly_metrics",
-                "technical_indicators_store",
-                "synthesis_results",
-                "sec_submissions",
-                "xbrl_company_facts",
-                "quarterly_ai_summaries"
+                "sec_responses",             # Used by SEC cache handlers (renamed)
+                "llm_responses",             # Used by LLM cache handlers and synthesizer (renamed)
+                "sec_submissions",           # Used by SEC quarterly processor and cache (renamed, consolidated)
+                "sec_companyfacts",          # Used by SEC quarterly processor and cache (renamed)
+                "quarterly_metrics"          # Used by SEC strategies and cache
             ]
+            # Note: technical_indicators, stock_analysis, sec_filings removed - using parquet-only storage
         
         try:
             # Connect to database
@@ -151,84 +152,27 @@ class CacheCleanup:
                 conn.close()
                 
     def clean_symbol_cache_managed(self, symbol: str) -> bool:
-        """Clean all cache data for a specific symbol using cache manager and config"""
+        """Clean all cache data for a specific symbol using optimized cache manager"""
         try:
-            import concurrent.futures
-            import threading
-            from functools import partial
+            logger.info(f"🧹 Starting optimized cache cleanup for symbol: {symbol}")
             
-            total_deleted = 0
-            logger.info(f"Cleaning cache for symbol: {symbol}")
+            # Use the new optimized delete_by_symbol method
+            deletion_results = self.cache_manager.delete_by_symbol(symbol)
             
-            # Get all enabled cache types from configuration
-            enabled_cache_types = []
-            if hasattr(self.config, 'cache_control') and self.config.cache_control.types:
-                # Map config cache types to CacheType enum
-                type_mapping = {
-                    'sec': CacheType.SEC_RESPONSE,
-                    'llm': CacheType.LLM_RESPONSE,
-                    'technical': CacheType.TECHNICAL_DATA,
-                    'submission': CacheType.SUBMISSION_DATA,
-                    'company_facts': CacheType.COMPANY_FACTS,
-                    'quarterly_metrics': CacheType.QUARTERLY_METRICS
-                }
-                
-                for cache_type_name in self.config.cache_control.types:
-                    if cache_type_name in type_mapping:
-                        enabled_cache_types.append(type_mapping[cache_type_name])
+            # Calculate total deletions
+            total_deleted = sum(deletion_results.values())
+            
+            # Log results
+            if total_deleted > 0:
+                cache_summary = " | ".join([f"{ct}:{count}" for ct, count in deletion_results.items() if count > 0])
+                logger.info(f"✅ Optimized cleanup SUCCESS for {symbol}: {total_deleted} total deletions | {cache_summary}")
             else:
-                # Default to all cache types if no configuration
-                enabled_cache_types = [
-                    CacheType.SEC_RESPONSE,
-                    CacheType.LLM_RESPONSE,
-                    CacheType.TECHNICAL_DATA,
-                    CacheType.SUBMISSION_DATA,
-                    CacheType.COMPANY_FACTS,
-                    CacheType.QUARTERLY_METRICS
-                ]
+                logger.info(f"🔍 Optimized cleanup COMPLETE for {symbol}: No cache entries found")
             
-            # Thread-safe counter for deleted items
-            deleted_lock = threading.Lock()
-            
-            def clean_cache_type_parallel(cache_type: CacheType) -> int:
-                """Clean a specific cache type for the symbol"""
-                try:
-                    deleted_count = 0
-                    patterns = [f"{symbol}_*", f"*_{symbol}_*", f"{symbol}.*", f"*{symbol}*"]
-                    
-                    for pattern in patterns:
-                        deleted_count += self.cache_manager.delete_by_pattern(cache_type, pattern)
-                    
-                    logger.debug(f"Cleaned {deleted_count} entries from {cache_type} for {symbol}")
-                    return deleted_count
-                    
-                except Exception as e:
-                    logger.error(f"Error cleaning {cache_type} for {symbol}: {e}")
-                    return 0
-            
-            # Execute cache cleaning in parallel using ThreadPoolExecutor
-            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-                # Submit all cache type cleaning tasks
-                future_to_cache_type = {
-                    executor.submit(clean_cache_type_parallel, cache_type): cache_type 
-                    for cache_type in enabled_cache_types
-                }
-                
-                # Wait for all tasks to complete and collect results
-                for future in concurrent.futures.as_completed(future_to_cache_type):
-                    cache_type = future_to_cache_type[future]
-                    try:
-                        deleted_count = future.result()
-                        with deleted_lock:
-                            total_deleted += deleted_count
-                    except Exception as e:
-                        logger.error(f"Error in parallel cleaning of {cache_type}: {e}")
-            
-            logger.info(f"Cleaned {total_deleted} cache entries for symbol {symbol} (parallel execution)")
             return True
             
         except Exception as e:
-            logger.error(f"Error cleaning symbol cache for {symbol}: {e}")
+            logger.error(f"Error in optimized symbol cache cleanup for {symbol}: {e}")
             return False
     
     def clean_symbols_cache_managed(self, symbols: List[str]) -> bool:

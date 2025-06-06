@@ -402,6 +402,87 @@ class ChartGenerator:
             logger.error(f"Error generating 2D plot: {e}")
             return ""
     
+    def generate_growth_value_plot(self, recommendations: List[Dict]) -> str:
+        """Generate 2D plot showing growth vs value positioning"""
+        try:
+            fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+            
+            # Extract data
+            symbols = []
+            growth_scores = []
+            value_scores = []
+            overall_scores = []
+            colors = []
+            
+            for rec in recommendations:
+                symbol = rec.get('symbol', 'UNK')
+                symbols.append(symbol)
+                
+                # Extract scores
+                growth_score = rec.get('growth_score', 5.0)
+                value_score = rec.get('value_score', 5.0)
+                overall_score = rec.get('overall_score', 5.0)
+                
+                growth_scores.append(growth_score)
+                value_scores.append(value_score)
+                overall_scores.append(overall_score)
+                
+                # Color based on overall score
+                if overall_score >= 7:
+                    colors.append('green')
+                elif overall_score >= 4:
+                    colors.append('orange')
+                else:
+                    colors.append('red')
+            
+            # Create scatter plot with size based on overall score
+            scatter = ax.scatter(value_scores, growth_scores, 
+                               s=[score * 30 for score in overall_scores],
+                               c=colors, alpha=0.7, edgecolors='black', linewidth=1)
+            
+            # Add labels for each point
+            for i, symbol in enumerate(symbols):
+                ax.annotate(symbol, (value_scores[i], growth_scores[i]), 
+                          xytext=(5, 5), textcoords='offset points', fontsize=8)
+            
+            # Add quadrant lines
+            ax.axvline(x=5, color='gray', linestyle='--', alpha=0.5)
+            ax.axhline(y=5, color='gray', linestyle='--', alpha=0.5)
+            
+            # Add quadrant labels
+            ax.text(2.5, 8.5, 'Growth\nStocks', ha='center', va='center', 
+                   fontsize=12, alpha=0.7, bbox=dict(boxstyle="round,pad=0.3", facecolor="lightblue"))
+            ax.text(7.5, 8.5, 'Quality\nGrowth', ha='center', va='center', 
+                   fontsize=12, alpha=0.7, bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgreen"))
+            ax.text(2.5, 2.5, 'Deep\nValue', ha='center', va='center', 
+                   fontsize=12, alpha=0.7, bbox=dict(boxstyle="round,pad=0.3", facecolor="lightyellow"))
+            ax.text(7.5, 2.5, 'Value\nTraps', ha='center', va='center', 
+                   fontsize=12, alpha=0.7, bbox=dict(boxstyle="round,pad=0.3", facecolor="lightcoral"))
+            
+            # Set labels and title
+            ax.set_xlabel('Value Score', fontsize=12)
+            ax.set_ylabel('Growth Score', fontsize=12)
+            ax.set_title('Growth vs Value Analysis\nSize = Overall Score', fontsize=14)
+            
+            # Set axis limits
+            ax.set_xlim(0, 10)
+            ax.set_ylim(0, 10)
+            
+            # Add grid
+            ax.grid(True, alpha=0.3)
+            
+            # Save plot
+            plot_path = self.charts_dir / "growth_value_analysis.png"
+            plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
+            plt.close()
+            
+            logger.info(f"📊 Generated growth/value plot: {plot_path}")
+            return str(plot_path)
+            
+        except Exception as e:
+            logger.error(f"Error generating growth/value plot: {e}")
+            return ""
+    
     def _extract_income_score(self, rec: Dict) -> float:
         """Extract income statement score from recommendation"""
         # If explicitly provided, use it
@@ -479,3 +560,150 @@ class ChartGenerator:
             return fundamental_score
         else:
             return max(fundamental_score - 0.5, 1.0)
+    
+    def generate_comprehensive_3d_plot(self, chart_data: List[Dict]) -> str:
+        """Generate comprehensive 3D plot for peer group positioning"""
+        try:
+            from mpl_toolkits.mplot3d import Axes3D
+            
+            if not chart_data:
+                logger.warning("No chart data provided for comprehensive 3D plot")
+                return ""
+            
+            fig = plt.figure(figsize=(12, 9))
+            ax = fig.add_subplot(111, projection='3d')
+            
+            # Extract data for plotting
+            symbols = []
+            overall_scores = []
+            technical_scores = []
+            fundamental_scores = []
+            sectors = []
+            colors_map = {
+                'financials': 'blue',
+                'technology': 'green', 
+                'healthcare': 'red',
+                'consumer_discretionary': 'orange',
+                'industrials': 'purple',
+                'energy': 'brown',
+                'utilities': 'pink',
+                'materials': 'gray',
+                'real_estate': 'olive',
+                'communication_services': 'cyan',
+                'consumer_staples': 'magenta',
+                'unknown': 'black'
+            }
+            
+            for data in chart_data:
+                symbols.append(data.get('symbol', 'UNK'))
+                overall_scores.append(data.get('overall_score', 5.0))
+                technical_scores.append(data.get('technical_score', 5.0))
+                fundamental_scores.append(data.get('fundamental_score', 5.0))
+                sectors.append(data.get('sector', 'unknown'))
+            
+            # Map sectors to colors
+            colors = [colors_map.get(sector.lower(), 'black') for sector in sectors]
+            
+            # Create 3D scatter plot
+            scatter = ax.scatter(overall_scores, technical_scores, fundamental_scores,
+                               s=100, c=colors, alpha=0.7, edgecolors='black', linewidth=0.5)
+            
+            # Add labels for each point
+            for i, symbol in enumerate(symbols):
+                ax.text(overall_scores[i], technical_scores[i], fundamental_scores[i], 
+                       f'  {symbol}', fontsize=8)
+            
+            # Set labels and title
+            ax.set_xlabel('Overall Score', fontsize=12)
+            ax.set_ylabel('Technical Score', fontsize=12)
+            ax.set_zlabel('Fundamental Score', fontsize=12)
+            ax.set_title('3D Comprehensive Investment Universe\nPositioning Analysis', fontsize=14)
+            
+            # Add sector legend
+            unique_sectors = list(set(sectors))
+            legend_elements = []
+            for sector in unique_sectors:
+                color = colors_map.get(sector.lower(), 'black')
+                legend_elements.append(
+                    plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=color, 
+                              markersize=8, label=sector.title())
+                )
+            ax.legend(handles=legend_elements, loc='upper left', bbox_to_anchor=(0.02, 0.98))
+            
+            # Save plot
+            plot_path = self.charts_dir / "comprehensive_3d_universe.png"
+            plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
+            plt.close()
+            
+            logger.info(f"📊 Generated comprehensive 3D plot: {plot_path}")
+            return str(plot_path)
+            
+        except Exception as e:
+            logger.error(f"Error generating comprehensive 3D plot: {e}")
+            return ""
+    
+    def generate_sector_comparison_plot(self, chart_data: List[Dict]) -> str:
+        """Generate sector comparison chart"""
+        try:
+            if not chart_data:
+                logger.warning("No chart data provided for sector comparison plot")
+                return ""
+            
+            fig, ax = plt.subplots(figsize=(12, 8))
+            
+            # Group data by sector
+            sector_data = {}
+            for data in chart_data:
+                sector = data.get('sector', 'unknown').title()
+                if sector not in sector_data:
+                    sector_data[sector] = []
+                sector_data[sector].append(data)
+            
+            # Calculate sector averages
+            sector_names = []
+            avg_scores = []
+            symbol_counts = []
+            colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', 
+                     '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
+            
+            for i, (sector, symbols) in enumerate(sector_data.items()):
+                sector_names.append(sector)
+                avg_score = sum(s.get('overall_score', 5.0) for s in symbols) / len(symbols)
+                avg_scores.append(avg_score)
+                symbol_counts.append(len(symbols))
+            
+            # Create bar chart
+            bars = ax.bar(sector_names, avg_scores, 
+                         color=[colors[i % len(colors)] for i in range(len(sector_names))],
+                         alpha=0.7, edgecolor='black', linewidth=0.5)
+            
+            # Add value labels on bars
+            for i, (bar, count) in enumerate(zip(bars, symbol_counts)):
+                height = bar.get_height()
+                ax.text(bar.get_x() + bar.get_width()/2., height + 0.1,
+                       f'{height:.1f}\n({count} stocks)', 
+                       ha='center', va='bottom', fontsize=9)
+            
+            # Formatting
+            ax.set_ylabel('Average Investment Score', fontsize=12)
+            ax.set_xlabel('Sector', fontsize=12)
+            ax.set_title('Sector Performance Comparison\nAverage Investment Scores by Sector', fontsize=14)
+            ax.set_ylim(0, 10)
+            ax.grid(axis='y', alpha=0.3)
+            
+            # Rotate x-axis labels if needed
+            plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+            
+            plt.tight_layout()
+            
+            # Save plot
+            plot_path = self.charts_dir / "sector_comparison.png"
+            plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
+            plt.close()
+            
+            logger.info(f"📊 Generated sector comparison plot: {plot_path}")
+            return str(plot_path)
+            
+        except Exception as e:
+            logger.error(f"Error generating sector comparison plot: {e}")
+            return ""

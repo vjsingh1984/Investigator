@@ -15,7 +15,10 @@
     "cache_dir": "data/sec_cache",
     "ticker_cache_file": "data/ticker_cik_map.txt",
     "max_retries": 3,
-    "timeout": 30
+    "timeout": 30,
+    "max_periods_to_analyze": 8,
+    "require_submissions": false,
+    "include_amended_filings": true
   },
   "analysis": {
     "fundamental_weight": 0.6,
@@ -29,27 +32,56 @@
     "base_url": "http://localhost:11434",
     "models": {
       "fundamental_analysis": "llama3.1:8b-instruct-q8_0",
-      "technical_analysis": "llama3.1:8b-instruct-q8_0", 
-      "synthesis": "llama3.1:8b-instruct-q8_0"
+      "quarterly_analysis": "llama3.1:8b-instruct-q8_0",
+      "technical_analysis": "qwen3-30b-40k-financial:latest",
+      "comprehensive_analysis": "llama3.1:8b-instruct-q8_0",
+      "synthesis": "llama3.1:8b-instruct-q8_0",
+      "risk_assessment": "llama3.1:8b-instruct-q8_0"
     },
-    "timeout": 300,
+    "timeout": 1800,
     "max_retries": 3,
-    "min_context_size": 8192,
+    "min_context_size": 4096,
     "num_llm_threads": 1,
     "num_predict": {
       "fundamental_analysis": 2048,
-      "technical_analysis": 1024,
-      "synthesis": 2048
+      "quarterly_analysis": 2048,
+      "technical_analysis": 4096,
+      "comprehensive_analysis": 6144,
+      "synthesis": 4096,
+      "risk_assessment": 2048
     }
   },
   "cache_control": {
-    "storage": ["disk", "rdbms"],
+    "storage": [
+      "disk",
+      "rdbms"
+    ],
     "types": null,
     "read_from_cache": true,
     "write_to_cache": true,
     "force_refresh": false,
     "force_refresh_symbols": null,
-    "cache_ttl_override": null
+    "cache_ttl_override": null,
+    "disk_structure": {
+      "use_symbol_directories": true,
+      "compression": {
+        "enabled": true,
+        "algorithm": "gzip",
+        "level": 9,
+        "apply_to_all": true,
+        "file_extensions": [".json", ".txt", ".parquet", ".csv", ".log"]
+      },
+      "base_paths": {
+        "sec_cache": "data/sec_cache",
+        "llm_cache": "data/llm_cache",
+        "technical_cache": "data/technical_cache"
+      },
+      "directory_structure": {
+        "sec_cache": "{base_path}/{cache_type}/{symbol}/",
+        "llm_cache": "{base_path}/{symbol}/",
+        "technical_cache": "{base_path}/{symbol}/"
+      }
+    }
   },
   "email": {
     "enabled": false,
@@ -62,6 +94,22 @@
     "recipients": []
   },
   "tracking": {
-    "symbols": ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "NVDA", "META", "NFLX", "V", "MA"]
+    "symbols": [
+      "AAPL",
+      "MSFT",
+      "GOOGL",
+      "AMZN",
+      "TSLA",
+      "NVDA",
+      "META",
+      "NFLX",
+      "V",
+      "MA"
+    ]
+  },
+  "vector_db": {
+    "enabled": false,
+    "db_path": "data/vector_db",
+    "embedding_model": "all-MiniLM-L6-v2"
   }
 }

@@ -21,56 +21,12 @@ from utils.cache.cache_manager import get_cache_manager
 from utils.cache.cache_types import CacheType
 from utils.ticker_cik_mapper import ticker_to_cik
 from utils.submission_processor import SubmissionProcessor, Filing
-from utils.cache.submission_cache_handler import SubmissionCacheHandler
+# Now using cache_manager interface for all cache operations
 from utils.sec_frame_api import SECFrameAPI
 from utils.db import safe_json_dumps
+from data.models import QuarterlyData, FinancialStatementData
 
 logger = logging.getLogger(__name__)
-
-class QuarterlyData:
-    """Represents quarterly financial data for a company"""
-    
-    def __init__(self, symbol: str, fiscal_year: int, fiscal_period: str, 
-                 form_type: str, filing_date: str, accession_number: str, cik: str):
-        self.symbol = symbol
-        self.fiscal_year = fiscal_year
-        self.fiscal_period = fiscal_period
-        self.form_type = form_type
-        self.filing_date = filing_date
-        self.accession_number = accession_number
-        self.cik = cik
-        self.financial_data: Dict = {}
-        self.metadata: Dict = {}
-        
-    def add_category_data(self, category: str, data: Dict):
-        """Add financial data for a category"""
-        self.financial_data[category] = data
-        
-    def get_period_key(self) -> str:
-        """Get standardized period key"""
-        return f"{self.fiscal_year}-{self.fiscal_period}"
-        
-    def to_dict(self) -> Dict:
-        """Convert to dictionary"""
-        from datetime import date, datetime
-        
-        # Handle date serialization
-        filing_date_str = self.filing_date
-        if isinstance(self.filing_date, (date, datetime)):
-            filing_date_str = self.filing_date.isoformat()
-        
-        return {
-            'symbol': self.symbol,
-            'fiscal_year': self.fiscal_year,
-            'fiscal_period': self.fiscal_period,
-            'form_type': self.form_type,
-            'filing_date': filing_date_str,
-            'accession_number': self.accession_number,
-            'cik': self.cik,
-            'period_key': self.get_period_key(),
-            'financial_data': self.financial_data,
-            'metadata': self.metadata
-        }
 
 class SECQuarterlyProcessor:
     """
@@ -87,7 +43,7 @@ class SECQuarterlyProcessor:
         self.config = config or get_config()
         self.cache_manager = get_cache_manager()
         self.submission_processor = SubmissionProcessor()
-        self.submission_cache = SubmissionCacheHandler()
+        # Using cache_manager interface for all cache operations
         self.frame_api = SECFrameAPI()
         
         # Logging setup
@@ -134,15 +90,16 @@ class SECQuarterlyProcessor:
             return []
     
     def _check_submissions_store(self, ticker: str, cik: str) -> bool:
-        """Check if submissions are available in store"""
+        """Check if submissions are available using cache manager interface"""
         try:
-            # Use existing database DAO to check for submissions
-            from utils.db import get_all_submission_store_dao
-            dao = get_all_submission_store_dao()
+            # Use cache manager's exists method to check for submission data
+            cache_key = {
+                'symbol': ticker,
+                'cik': cik
+            }
             
-            # Try to get at least one submission
-            submissions = dao.get_recent_earnings_submissions(ticker, limit=1)
-            return len(submissions) > 0
+            # Check if submission data exists in any cache layer (disk -> RDBMS)
+            return self.cache_manager.exists(CacheType.SUBMISSION_DATA, cache_key)
             
         except Exception as e:
             self.main_logger.error(f"Error checking submissions store: {e}")
@@ -159,31 +116,57 @@ class SECQuarterlyProcessor:
             return False
     
     def _extract_recent_periods(self, ticker: str, cik: str, max_periods: int) -> List[QuarterlyData]:
-        """Extract recent periods from cached submissions"""
+        """Extract recent periods using cache manager interface"""
         try:
-            # Use existing database DAO to get recent earnings submissions
-            from utils.db import get_all_submission_store_dao
-            dao = get_all_submission_store_dao()
+            # Use cache manager's get method to retrieve submission data
+            cache_key = {
+                'symbol': ticker,
+                'cik': cik
+            }
             
-            # Get recent earnings submissions
-            submissions = dao.get_recent_earnings_submissions(ticker, limit=max_periods)
+            # Get submission data via cache manager (handles disk -> RDBMS priority)
+            submission_result = self.cache_manager.get(CacheType.SUBMISSION_DATA, cache_key)
             
-            if not submissions:
+            if not submission_result:
                 self.main_logger.warning(f"No submissions found for {ticker}")
                 return []
             
-            # Convert to QuarterlyData objects
+            # Extract submissions_data from the cached result
+            submissions_json = submission_result.get('submissions_data', {})
+            if not submissions_json:
+                self.main_logger.warning(f"No submission data in cache for {ticker}")
+                return []
+            
+            # Process the submission JSON to get recent earnings filings
+            recent_filings = self.submission_processor.get_recent_earnings_filings(
+                submissions_json, limit=max_periods
+            )
+            
+            if not recent_filings:
+                self.main_logger.warning(f"No recent filings found for {ticker}")
+                return []
+            
+            # Convert Filing objects to QuarterlyData objects
             quarterly_data = []
-            for submission in submissions:
+            for filing in recent_filings:
+                # Create empty FinancialStatementData
+                financial_data = FinancialStatementData(
+                    symbol=ticker,
+                    period=f"{filing.fiscal_year or 2024}-{filing.fiscal_period or 'Q1'}"
+                )
+                
                 qd = QuarterlyData(
                     symbol=ticker,
-                    fiscal_year=submission.get('fiscal_year', 0) or 2024,  # Default if missing
-                    fiscal_period=submission.get('fiscal_period', 'Q1') or 'Q1',  # Default if missing
-                    form_type=submission.get('form_type', '10-Q'),
-                    filing_date=submission.get('filing_date', ''),
-                    accession_number=submission.get('accession_number', ''),
-                    cik=cik
+                    cik=cik,
+                    fiscal_year=filing.fiscal_year or 2024,
+                    fiscal_period=filing.fiscal_period or 'Q1',
+                    form_type=filing.form_type,
+                    financial_data=financial_data
                 )
+                # Set optional fields from Filing object
+                qd.filing_date = filing.filing_date
+                qd.accession_number = filing.accession_number
+                qd.report_date = filing.report_date
                 quarterly_data.append(qd)
             
             symbol_logger = self.config.get_symbol_logger(ticker, 'sec_quarterly_processor')
@@ -209,15 +192,23 @@ class SECQuarterlyProcessor:
             # Convert to QuarterlyData objects
             quarterly_data = []
             for period in periods:
+                # Create empty FinancialStatementData
+                financial_data = FinancialStatementData(
+                    symbol=ticker,
+                    period=f"{period.get('fiscal_year', 0)}-{period.get('fiscal_period', '')}"
+                )
+                
                 qd = QuarterlyData(
                     symbol=ticker,
+                    cik=cik,
                     fiscal_year=period.get('fiscal_year', 0),
                     fiscal_period=period.get('fiscal_period', ''),
                     form_type=period.get('form_type', '10-Q'),
-                    filing_date=period.get('filing_date', ''),
-                    accession_number=period.get('accession_number', ''),
-                    cik=cik
+                    financial_data=financial_data
                 )
+                # Set optional fields
+                qd.filing_date = period.get('filing_date', '')
+                qd.accession_number = period.get('accession_number', '')
                 quarterly_data.append(qd)
                 
             return quarterly_data
@@ -230,8 +221,8 @@ class SECQuarterlyProcessor:
         """Get company facts from cache or SEC API"""
         try:
             # Use existing company facts DAO
-            from utils.db import get_all_companyfacts_store_dao
-            facts_dao = get_all_companyfacts_store_dao()
+            from utils.db import get_sec_companyfacts_dao
+            facts_dao = get_sec_companyfacts_dao()
             
             # Get company facts from database cache
             facts_result = facts_dao.get_company_facts(ticker)
@@ -394,13 +385,14 @@ class SECQuarterlyProcessor:
         """Extract specific category data from company facts"""
         try:
             # Get concepts for this category
-            frame_concepts = self.config.sec.frame_api_details
+            frame_concepts = self.config.sec.frame_api_concepts
             if category not in frame_concepts:
                 return None
                 
             concepts = frame_concepts[category]
             category_data = {
                 'concepts': {},
+                'calculated_metrics': {},  # For derived calculations like EPS
                 'metadata': {
                     'category': category,
                     'fiscal_year': fiscal_year,
@@ -417,6 +409,16 @@ class SECQuarterlyProcessor:
                     facts_data, concept_name, xbrl_tags, fiscal_year, fiscal_period
                 )
                 category_data['concepts'][concept_name] = concept_data
+            
+            # Calculate derived metrics for comprehensive analysis
+            if category == 'income_statement':
+                category_data['calculated_metrics'] = self._calculate_income_statement_metrics(
+                    category_data['concepts'], facts_data, fiscal_year, fiscal_period
+                )
+            elif category == 'balance_sheet':
+                category_data['calculated_metrics'] = self._calculate_balance_sheet_metrics(
+                    category_data['concepts'], facts_data, fiscal_year, fiscal_period
+                )
             
             return category_data
             
@@ -457,6 +459,193 @@ class SECQuarterlyProcessor:
         except Exception as e:
             self.main_logger.error(f"Error extracting concept data: {e}")
             return {'value': '', 'missing': True, 'error': str(e)}
+    
+    def _calculate_income_statement_metrics(self, concepts: Dict, facts_data: Dict, 
+                                          fiscal_year: int, fiscal_period: str) -> Dict:
+        """Calculate comprehensive income statement metrics including EPS"""
+        try:
+            calculated = {}
+            
+            # Get key values
+            revenue = self._get_concept_value(concepts, 'revenues')
+            net_income = self._get_concept_value(concepts, 'net_income')
+            gross_profit = self._get_concept_value(concepts, 'gross_profit')
+            operating_income = self._get_concept_value(concepts, 'operating_income')
+            
+            # Get shares outstanding data
+            shares_basic = self._extract_shares_data(facts_data, 'basic', fiscal_year, fiscal_period)
+            shares_diluted = self._extract_shares_data(facts_data, 'diluted', fiscal_year, fiscal_period)
+            
+            # Calculate EPS if we have net income and shares
+            if net_income and shares_basic:
+                calculated['eps_basic'] = {
+                    'value': round(net_income / shares_basic, 2),
+                    'calculation': f"{net_income} / {shares_basic}",
+                    'components': {
+                        'net_income': net_income,
+                        'shares_basic': shares_basic
+                    }
+                }
+            
+            if net_income and shares_diluted:
+                calculated['eps_diluted'] = {
+                    'value': round(net_income / shares_diluted, 2),
+                    'calculation': f"{net_income} / {shares_diluted}",
+                    'components': {
+                        'net_income': net_income,
+                        'shares_diluted': shares_diluted
+                    }
+                }
+            
+            # Calculate margins
+            if revenue:
+                if gross_profit:
+                    calculated['gross_margin'] = {
+                        'value': round((gross_profit / revenue) * 100, 2),
+                        'calculation': f"({gross_profit} / {revenue}) * 100",
+                        'unit': 'percentage'
+                    }
+                
+                if operating_income:
+                    calculated['operating_margin'] = {
+                        'value': round((operating_income / revenue) * 100, 2),
+                        'calculation': f"({operating_income} / {revenue}) * 100",
+                        'unit': 'percentage'
+                    }
+                
+                if net_income:
+                    calculated['net_margin'] = {
+                        'value': round((net_income / revenue) * 100, 2),
+                        'calculation': f"({net_income} / {revenue}) * 100",
+                        'unit': 'percentage'
+                    }
+            
+            # Add shares outstanding for transparency
+            if shares_basic:
+                calculated['shares_outstanding_basic'] = {
+                    'value': shares_basic,
+                    'unit': 'shares',
+                    'source': 'xbrl_extraction'
+                }
+            
+            if shares_diluted:
+                calculated['shares_outstanding_diluted'] = {
+                    'value': shares_diluted,
+                    'unit': 'shares',
+                    'source': 'xbrl_extraction'
+                }
+            
+            return calculated
+            
+        except Exception as e:
+            self.main_logger.error(f"Error calculating income statement metrics: {e}")
+            return {}
+    
+    def _calculate_balance_sheet_metrics(self, concepts: Dict, facts_data: Dict,
+                                       fiscal_year: int, fiscal_period: str) -> Dict:
+        """Calculate comprehensive balance sheet metrics"""
+        try:
+            calculated = {}
+            
+            # Get key values
+            total_assets = self._get_concept_value(concepts, 'total_assets')
+            current_assets = self._get_concept_value(concepts, 'current_assets')
+            current_liabilities = self._get_concept_value(concepts, 'current_liabilities')
+            total_liabilities = self._get_concept_value(concepts, 'total_liabilities')
+            shareholders_equity = self._get_concept_value(concepts, 'shareholders_equity')
+            cash = self._get_concept_value(concepts, 'cash_and_equivalents')
+            
+            # Calculate ratios
+            if current_assets and current_liabilities:
+                calculated['current_ratio'] = {
+                    'value': round(current_assets / current_liabilities, 2),
+                    'calculation': f"{current_assets} / {current_liabilities}",
+                    'components': {
+                        'current_assets': current_assets,
+                        'current_liabilities': current_liabilities
+                    }
+                }
+            
+            if total_liabilities and shareholders_equity:
+                calculated['debt_to_equity'] = {
+                    'value': round(total_liabilities / shareholders_equity, 2),
+                    'calculation': f"{total_liabilities} / {shareholders_equity}",
+                    'components': {
+                        'total_liabilities': total_liabilities,
+                        'shareholders_equity': shareholders_equity
+                    }
+                }
+            
+            if current_assets and current_liabilities:
+                working_capital = current_assets - current_liabilities
+                calculated['working_capital'] = {
+                    'value': working_capital,
+                    'calculation': f"{current_assets} - {current_liabilities}",
+                    'unit': 'USD'
+                }
+            
+            # Book value per share calculation
+            shares_outstanding = self._extract_shares_data(facts_data, 'outstanding', fiscal_year, fiscal_period)
+            if shareholders_equity and shares_outstanding:
+                calculated['book_value_per_share'] = {
+                    'value': round(shareholders_equity / shares_outstanding, 2),
+                    'calculation': f"{shareholders_equity} / {shares_outstanding}",
+                    'components': {
+                        'shareholders_equity': shareholders_equity,
+                        'shares_outstanding': shares_outstanding
+                    }
+                }
+            
+            return calculated
+            
+        except Exception as e:
+            self.main_logger.error(f"Error calculating balance sheet metrics: {e}")
+            return {}
+    
+    def _get_concept_value(self, concepts: Dict, concept_name: str) -> Optional[float]:
+        """Get numeric value from concept data"""
+        try:
+            concept_data = concepts.get(concept_name, {})
+            if concept_data and not concept_data.get('missing', False):
+                value = concept_data.get('value')
+                if value and str(value).replace('-', '').replace('.', '').isdigit():
+                    return float(value)
+            return None
+        except:
+            return None
+    
+    def _extract_shares_data(self, facts_data: Dict, share_type: str, 
+                           fiscal_year: int, fiscal_period: str) -> Optional[float]:
+        """Extract shares outstanding data from facts"""
+        try:
+            # Define share concept tags based on type
+            share_concepts = {
+                'basic': ['WeightedAverageNumberOfSharesOutstandingBasic', 'SharesBasic'],
+                'diluted': ['WeightedAverageNumberOfDilutedSharesOutstanding', 'SharesDiluted'],
+                'outstanding': ['CommonStockSharesOutstanding', 'SharesOutstanding', 'SharesOut']
+            }
+            
+            tags = share_concepts.get(share_type, [])
+            
+            for tag in tags:
+                if tag in facts_data:
+                    units = facts_data[tag].get('units', {})
+                    
+                    # Look for shares units
+                    for unit_type in ['shares', 'USD/shares', 'pure']:
+                        if unit_type in units:
+                            for entry in units[unit_type]:
+                                if (entry.get('fy') == fiscal_year and 
+                                    entry.get('fp') == fiscal_period):
+                                    value = entry.get('val')
+                                    if value and str(value).replace('-', '').replace('.', '').isdigit():
+                                        return float(value)
+            
+            return None
+            
+        except Exception as e:
+            self.main_logger.error(f"Error extracting shares data: {e}")
+            return None
     
     def _save_consolidated_data(self, qd: QuarterlyData):
         """Save consolidated quarterly data to cache"""

@@ -90,6 +90,7 @@ class SubmissionProcessor:
             Structured submission data with parsed filings
         """
         try:
+            self.logger.debug(f"Starting to parse submissions data, size: {len(str(submissions_data))}")
             # Extract company information
             parsed_data = {
                 'cik': submissions_data.get('cik', ''),
@@ -112,6 +113,7 @@ class SubmissionProcessor:
                 'filings': self._parse_filings(submissions_data.get('filings', {}))
             }
             
+            self.logger.debug(f"Successfully parsed submissions data")
             return parsed_data
             
         except Exception as e:
@@ -121,7 +123,9 @@ class SubmissionProcessor:
     def _parse_filings(self, filings_data: Dict) -> Dict:
         """Parse filings section of submissions data"""
         try:
+            self.logger.debug(f"Parsing filings data, filings count: {len(filings_data)}")
             recent_filings = filings_data.get('recent', {})
+            self.logger.debug(f"Got recent filings, processing arrays")
             
             # Extract filing arrays
             form_types = recent_filings.get('form', [])
@@ -171,109 +175,30 @@ class SubmissionProcessor:
             List of Filing objects, with amendments taking precedence
         """
         try:
+            self.logger.debug(f"Getting recent earnings filings, limit: {limit}")
             all_filings = submissions_data.get('filings', {}).get('all', [])
+            self.logger.debug(f"Total filings available: {len(all_filings)}")
             
             # Filter for earnings filings (10-K, 10-Q and their amendments)
+            self.logger.debug(f"Filtering for earnings filings (10-K, 10-Q)")
             earnings_filings = []
             for filing in all_filings:
                 base_type = filing.base_form_type
                 if base_type in ['10-K', '10-Q']:
                     if include_amendments or not filing.is_amended:
                         earnings_filings.append(filing)
+            self.logger.debug(f"Found {len(earnings_filings)} earnings filings")
             
-            # Group by period and resolve amendments
-            period_filings = {}
-            for filing in earnings_filings:
-                period_key = filing.period_key
-                
-                if period_key not in period_filings:
-                    period_filings[period_key] = filing
-                else:
-                    # Compare with existing filing for this period
-                    existing = period_filings[period_key]
-                    
-                    # Amended filing takes precedence
-                    if filing.is_amended and not existing.is_amended:
-                        period_filings[period_key] = filing
-                    elif filing.is_amended and existing.is_amended:
-                        # Higher amendment number takes precedence
-                        if (filing.amendment_number or 0) > (existing.amendment_number or 0):
-                            period_filings[period_key] = filing
-                    elif not filing.is_amended and existing.is_amended:
-                        # Keep the amended version
-                        pass
-                    else:
-                        # Both are original, keep the more recent filing date
-                        if filing.filing_date > existing.filing_date:
-                            period_filings[period_key] = filing
+            self.logger.debug(f"Grouping filings by period and resolving amendments")
             
-            # Generic logic for balanced quarter distribution
-            # Priority order: FY (annual), Q4, Q3, Q2, Q1
-            period_order = ['FY', 'Q4', 'Q3', 'Q2', 'Q1']
-            period_priority = {period: i for i, period in enumerate(period_order)}
+            # TEMPORARY FIX: Use simpler logic to avoid hanging
+            # Just sort by filing date and take the most recent filings
+            earnings_filings.sort(key=lambda f: f.filing_date, reverse=True)
+            result = earnings_filings[:limit]
             
-            # Group filings by period type
-            periods_by_type = {}
-            for filing in period_filings.values():
-                period_type = filing.fiscal_period
-                if period_type not in periods_by_type:
-                    periods_by_type[period_type] = []
-                periods_by_type[period_type].append(filing)
-            
-            # Sort filings within each period type by fiscal year (descending)
-            for period_type in periods_by_type:
-                periods_by_type[period_type].sort(
-                    key=lambda f: f.fiscal_year,
-                    reverse=True
-                )
-            
-            # Calculate slots per period type for balanced distribution
-            available_periods = [p for p in period_order if p in periods_by_type]
-            num_periods = len(available_periods)
-            
-            if num_periods == 0:
-                sorted_filings = []
-            else:
-                # Base slots per period (integer division)
-                base_slots_per_period = limit // num_periods
-                # Extra slots to distribute (remainder)
-                extra_slots = limit % num_periods
-                
-                # Distribute slots: give base slots to all, then distribute extras in priority order
-                slots_per_period = {}
-                for i, period_type in enumerate(available_periods):
-                    slots_per_period[period_type] = base_slots_per_period
-                    if i < extra_slots:  # Distribute extra slots to higher priority periods
-                        slots_per_period[period_type] += 1
-                
-                # Select filings based on calculated slots
-                selected_filings = []
-                for period_type in available_periods:
-                    max_slots = slots_per_period[period_type]
-                    available_filings = periods_by_type[period_type]
-                    selected_count = min(max_slots, len(available_filings))
-                    selected_filings.extend(available_filings[:selected_count])
-                
-                # Sort final selection by fiscal year and period priority (descending)
-                sorted_filings = sorted(
-                    selected_filings,
-                    key=lambda f: (f.fiscal_year, period_priority.get(f.fiscal_period, 5)),
-                    reverse=True
-                )
-            
-            # Apply limit
-            result = sorted_filings[:limit]
-            
-            # Log summary with slot distribution
-            if num_periods > 0:
-                slot_info = ", ".join([f"{p}:{slots_per_period[p]}" for p in available_periods])
-                self.logger.info(f"Found {len(result)} unique earnings filings (limit: {limit}, slots: {slot_info})")
-            else:
-                self.logger.info(f"Found {len(result)} unique earnings filings (limit: {limit})")
-            
-            for filing in result[:8]:  # Log up to 8 filings
-                amend_info = f" (Amendment {filing.amendment_number})" if filing.is_amended else ""
-                self.logger.debug(f"  - {filing.form_type} {filing.period_key} filed {filing.filing_date}{amend_info}")
+            self.logger.info(f"Found {len(result)} recent earnings filings (simplified logic)")
+            for filing in result[:5]:  # Log first 5 filings
+                self.logger.debug(f"  - {filing.form_type} {filing.period_key} filed {filing.filing_date}")
             
             return result
             

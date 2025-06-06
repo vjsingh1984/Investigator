@@ -9,6 +9,7 @@ Provides simplified interface for SEC data operations using design patterns
 """
 
 import logging
+import json
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
@@ -16,7 +17,8 @@ from patterns.sec.sec_strategies import (
     ISECDataFetchStrategy, CompanyFactsStrategy, SubmissionsStrategy, 
     CachedDataStrategy, HybridFetchStrategy
 )
-from utils.cache import get_cache_facade
+from utils.cache.cache_manager import get_cache_manager
+from utils.cache.cache_types import CacheType
 from patterns.sec.sec_adapters import (
     SECToInternalAdapter, InternalToLLMAdapter, 
     FilingContentAdapter, CompanyFactsToDetailedAdapter
@@ -42,7 +44,7 @@ class SECDataFacade:
         
         # Initialize components
         self.ticker_mapper = TickerCIKMapper(data_dir=str(self.config.sec.cache_dir))
-        self.cache_facade = get_cache_facade(config)
+        self.cache_manager = get_cache_manager()
         
         # Initialize strategies
         self.strategies = {
@@ -61,7 +63,7 @@ class SECDataFacade:
         # Default strategy
         self.default_strategy = 'hybrid'
     
-    def get_recent_quarterly_data(self, symbol: str, max_periods: int = 4,
+    def get_recent_quarterly_data(self, symbol: str, max_periods: int = 8,
                                  strategy: Optional[str] = None) -> List[QuarterlyData]:
         """
         Get recent quarterly data for a symbol.
@@ -105,11 +107,12 @@ class SECDataFacade:
     def get_company_facts(self, symbol: str) -> Optional[Dict[str, Any]]:
         """Get company facts with caching"""
         try:
-            cik = self.ticker_mapper.get_cik_padded(symbol)
+            cik = self.ticker_mapper.resolve_cik(symbol)
             if not cik:
                 return None
             
-            return self.cache_facade.get_company_facts(symbol, cik)
+            cache_key = {'symbol': symbol, 'cik': cik}
+            return self.cache_manager.get(CacheType.COMPANY_FACTS, cache_key)
             
         except Exception as e:
             self.logger.error(f"Error getting company facts for {symbol}: {e}")
@@ -123,7 +126,8 @@ class SECDataFacade:
                 return None
             
             # Get submissions
-            submissions_data = self.cache_facade.get_submissions(symbol, cik)
+            cache_key = {'symbol': symbol, 'cik': cik}
+            submissions_data = self.cache_manager.get(CacheType.SUBMISSION_DATA, cache_key)
             if not submissions_data:
                 return None
             
@@ -261,14 +265,15 @@ class FundamentalAnalysisFacadeV2:
         
         # Initialize components
         self.sec_facade = SECDataFacade(config)
-        self.cache_facade = get_cache_facade(config)
+        self.cache_manager = get_cache_manager()
         
-        # Use existing aggregator and LLM interface
+        # Use existing aggregator and LLM facade with cache management
         from utils.financial_data_aggregator import FinancialDataAggregator
         from patterns.llm.llm_facade import create_llm_facade
         
         self.data_aggregator = FinancialDataAggregator(config)
-        self.ollama = create_llm_facade(config)
+        # Pass cache_manager to enable caching in LLM facade
+        self.ollama = create_llm_facade(config, self.cache_manager)
         
         # Observer pattern removed - using direct logging instead
     
@@ -288,7 +293,7 @@ class FundamentalAnalysisFacadeV2:
             self.logger.info(f"Starting fundamental analysis for {symbol}")
             
             # Get quarterly data
-            max_periods = options.get('max_periods', 4)
+            max_periods = options.get('max_periods', 8)
             strategy = options.get('strategy', 'hybrid')
             
             quarterly_data = self.sec_facade.get_recent_quarterly_data(
@@ -302,6 +307,12 @@ class FundamentalAnalysisFacadeV2:
             
             # Aggregate data
             aggregated = self.data_aggregator.aggregate_quarterly_data(quarterly_data)
+            
+            # Calculate average extraction-level quality for comparison
+            extraction_qualities = [qd.financial_data.data_quality_score * 100 
+                                  for qd in quarterly_data 
+                                  if hasattr(qd.financial_data, 'data_quality_score') and qd.financial_data.data_quality_score]
+            avg_extraction_quality = sum(extraction_qualities) / len(extraction_qualities) if extraction_qualities else 0
             
             self.logger.info(f"Data aggregated for {symbol}")
             
@@ -329,36 +340,101 @@ class FundamentalAnalysisFacadeV2:
                         'form_type': getattr(qdata, 'form_type', 'Unknown')
                     })
             
-            # Use pattern-based fundamental analysis
-            analysis_result = self.ollama.analyze_fundamental(
-                symbol=symbol,
-                quarterly_data=quarterly_data_dicts,
-                filing_data=aggregated
-            )
-            
-            # Cache the LLM analysis result
-            try:
-                cache_success = self.cache_facade.cache_llm_response(
-                    symbol=symbol,
-                    llm_type='sec',
-                    response_data=analysis_result,
-                    form_type='10-K',
-                    period='latest'
-                )
-                if cache_success:
-                    self.logger.debug(f"Cached LLM fundamental analysis for {symbol}")
+            # Analyze each quarter separately first
+            quarterly_analyses = []
+            for i, qdata in enumerate(quarterly_data_dicts):
+                self.logger.info(f"Analyzing quarter {i+1}/{len(quarterly_data_dicts)}: {qdata.get('fiscal_year')}-{qdata.get('fiscal_period')}")
+                
+                # Analyze individual quarter
+                quarter_result = self._analyze_single_quarter(symbol, qdata)
+                if quarter_result and not quarter_result.get('error'):
+                    quarterly_analyses.append(quarter_result)
                 else:
-                    self.logger.warning(f"Failed to cache LLM analysis for {symbol}")
-            except Exception as cache_error:
-                self.logger.warning(f"Error caching LLM analysis for {symbol}: {cache_error}")
+                    self.logger.warning(f"Failed to analyze quarter {qdata.get('fiscal_period')}")
+            
+            # Create comprehensive analysis based on all quarters (conditional on skip_comprehensive)
+            if not options.get('skip_comprehensive', False):
+                self.logger.info(f"Creating comprehensive fundamental analysis from {len(quarterly_analyses)} quarters")
+                analysis_result = self._create_comprehensive_fundamental_analysis(
+                    symbol=symbol,
+                    quarterly_analyses=quarterly_analyses,
+                    aggregated_data=aggregated
+                )
+            else:
+                self.logger.info(f"Skipping comprehensive analysis (--skip-comprehensive flag set)")
+                # Return just the quarterly analyses without comprehensive synthesis
+                analysis_result = {
+                    'symbol': symbol,
+                    'quarterly_analyses': quarterly_analyses,
+                    'quarters_analyzed': len(quarterly_analyses),
+                    'analysis_summary': f'Quarterly analysis completed for {len(quarterly_analyses)} quarters',
+                    'skip_comprehensive': True,
+                    'analysis_timestamp': datetime.utcnow().isoformat()
+                }
+            
+            # Cache the comprehensive analysis result (only if comprehensive analysis was performed)
+            if not options.get('skip_comprehensive', False):
+                try:
+                    # Save comprehensive analysis with expected structure
+                    fiscal_year = datetime.now().year
+                    cache_response_data = {
+                        'prompt': '',  # Prompt is generated inside _create_comprehensive_fundamental_analysis
+                        'response': analysis_result,     # The parsed analysis result
+                        'model_info': {
+                            'model': self.config.ollama.models.get('fundamental_analysis', 'llama3.1:8b-instruct-q8_0'),
+                            'temperature': 0.3,
+                            'top_p': 0.9
+                        }
+                    }
+                    # Cache LLM response using cache manager directly
+                    cache_key = {
+                        'symbol': symbol,
+                        'form_type': 'COMPREHENSIVE',
+                        'period': f"{fiscal_year}-FY",
+                        'llm_type': 'sec'
+                    }
+                    cache_success = self.cache_manager.set(CacheType.LLM_RESPONSE, cache_key, cache_response_data)
+                    if cache_success:
+                        self.logger.debug(f"Cached LLM fundamental analysis for {symbol}")
+                    else:
+                        self.logger.warning(f"Failed to cache LLM analysis for {symbol}")
+                except Exception as cache_error:
+                    self.logger.warning(f"Error caching LLM analysis for {symbol}: {cache_error}")
+            else:
+                self.logger.info(f"Skipping comprehensive analysis cache (not performed)")
             
             # Extract response for processing
-            response = analysis_result.get('analysis_summary', '')
+            # The comprehensive analysis should return the structured data directly
+            if isinstance(analysis_result, dict) and 'analysis_summary' in analysis_result:
+                # Use the structured analysis result directly instead of trying to parse text
+                result = {
+                    'symbol': symbol,
+                    'financial_health_score': analysis_result.get('financial_health_score', 5.0),
+                    'business_quality_score': analysis_result.get('business_quality_score', 5.0),
+                    'growth_prospects_score': analysis_result.get('growth_prospects_score', 5.0),
+                    'overall_score': analysis_result.get('overall_score', 5.0),
+                    'key_insights': analysis_result.get('key_insights', []),
+                    'key_risks': analysis_result.get('key_risks', []),
+                    'confidence_level': analysis_result.get('confidence_level', 'MEDIUM'),
+                    'analysis_summary': analysis_result.get('analysis_summary', ''),
+                    'investment_thesis': analysis_result.get('investment_thesis', ''),
+                    'trend_analysis': analysis_result.get('trend_analysis', {}),
+                    'analysis_timestamp': datetime.utcnow().isoformat(),
+                    'data_quality': aggregated.get('data_quality', {}),
+                    'extraction_quality': avg_extraction_quality,
+                    'quarters_analyzed': aggregated.get('quarters_analyzed', 0),
+                    'quarterly_analyses': analysis_result.get('quarterly_analyses', []),
+                    'metadata': {
+                        'architecture': 'pattern-based',
+                        'version': '2.0'
+                    }
+                }
+            else:
+                # Fallback to text parsing if needed
+                response_text = analysis_result.get('analysis_summary', '') if isinstance(analysis_result, dict) else str(analysis_result)
+                result = self._parse_analysis_response(response_text, symbol, aggregated)
             
             self.logger.info(f"Analysis complete for {symbol}")
-            
-            # Parse and return results
-            result = self._parse_analysis_response(response, symbol, aggregated)
             
             self.logger.info(f"Fundamental analysis completed successfully for {symbol}")
             
@@ -396,15 +472,13 @@ Format as JSON.
                                 aggregated: Dict) -> Dict[str, Any]:
         """Parse LLM response"""
         try:
-            import json
+            from utils.json_utils import extract_json_from_text
             
-            # Extract JSON from response
-            start = response.find('{')
-            end = response.rfind('}') + 1
-            
-            if start >= 0 and end > start:
-                result = json.loads(response[start:end])
-            else:
+            # Extract JSON from response using robust parser
+            try:
+                result = extract_json_from_text(response)
+            except ValueError:
+                self.logger.warning(f"Failed to extract JSON from response for {symbol}")
                 result = {}
             
             # Ensure all fields are present
@@ -432,19 +506,193 @@ Format as JSON.
             return self._create_error_result(symbol, "Failed to parse analysis")
     
     def _create_error_result(self, symbol: str, error: str) -> Dict[str, Any]:
-        """Create error result"""
-        return {
-            'symbol': symbol,
-            'financial_health_score': 5.0,
-            'business_quality_score': 5.0,
-            'growth_prospects_score': 5.0,
-            'overall_score': 5.0,
-            'key_insights': [f'Analysis error: {error}'],
-            'key_risks': ['Unable to complete analysis'],
-            'confidence_level': 'LOW',
-            'analysis_summary': error,
-            'analysis_timestamp': datetime.utcnow().isoformat(),
-            'data_quality': {'completeness_score': 0},
-            'quarters_analyzed': 0,
-            'metadata': {'error': True}
-        }
+        """Raise error instead of returning default values"""
+        error_msg = f"SEC analysis failed for {symbol}: {error}"
+        self.logger.error(error_msg)
+        raise RuntimeError(error_msg)
+    
+    def _analyze_single_quarter(self, symbol: str, quarter_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze a single quarter's financial data"""
+        try:
+            from utils.prompt_manager import get_prompt_manager
+            prompt_manager = get_prompt_manager()
+            
+            # Render quarterly analysis prompt (removed dynamic analysis_date for better caching)
+            quarterly_prompt = prompt_manager.render_template(
+                'quarterly_fundamental_analysis.j2',
+                symbol=symbol,
+                analysis_date='STATIC_DATE_FOR_CACHE',  # Use static date for consistent cache keys
+                fiscal_year=quarter_data.get('fiscal_year', 'Unknown'),
+                fiscal_period=quarter_data.get('fiscal_period', 'Unknown'),
+                form_type=quarter_data.get('form_type', '10-Q'),
+                quarterly_data=json.dumps(quarter_data, indent=2)
+            )
+            
+            # Get model for quarterly analysis
+            model_name = self.config.ollama.models.get(
+                'quarterly_analysis', 
+                'llama3.1:8b-instruct-q8_0'
+            )
+            
+            # Submit to LLM facade with proper metadata for cache key generation
+            from patterns.llm.llm_interfaces import LLMTaskType
+            task_data = {
+                'symbol': symbol,
+                'quarter_data': quarter_data,
+                'prompt': quarterly_prompt,
+                # Explicitly add fiscal metadata for cache key generation
+                'fiscal_year': quarter_data.get('fiscal_year', 'Unknown'),
+                'fiscal_period': quarter_data.get('fiscal_period', 'Unknown'),
+                'form_type': quarter_data.get('form_type', '10-Q')
+            }
+            
+            # Use LLM facade's orchestration - it handles cache and queue management
+            response = self.ollama.generate_response(
+                task_type=LLMTaskType.QUARTERLY_SUMMARY,
+                data=task_data
+            )
+            
+            # LLM facade handles caching automatically - no manual caching needed
+            
+            return response
+            
+        except Exception as e:
+            self.logger.error(f"Error analyzing quarter {quarter_data.get('fiscal_period')}: {e}")
+            return {'error': str(e)}
+    
+    def _create_comprehensive_fundamental_analysis(self, symbol: str, 
+                                                 quarterly_analyses: List[Dict],
+                                                 aggregated_data: Dict) -> Dict[str, Any]:
+        """Create comprehensive analysis from quarterly analyses"""
+        try:
+            from utils.prompt_manager import get_prompt_manager
+            prompt_manager = get_prompt_manager()
+            
+            # Prepare summary of quarterly analyses
+            quarters_summary = []
+            for qa in quarterly_analyses:
+                if 'quarterly_summary' in qa:
+                    quarters_summary.append(qa['quarterly_summary'])
+                elif 'analysis_summary' in qa:
+                    quarters_summary.append({
+                        'period': qa.get('period', 'Unknown'),
+                        'score': qa.get('overall_score', 0),
+                        'summary': qa.get('analysis_summary', '')
+                    })
+            
+            # Create comprehensive prompt with trend analysis
+            comprehensive_prompt = f"""
+You are a senior equity research analyst creating a comprehensive fundamental analysis based on multiple quarterly reports.
+
+COMPANY: {symbol}
+ANALYSIS DATE: {datetime.now().strftime('%Y-%m-%d')}
+
+QUARTERLY ANALYSES SUMMARY:
+{json.dumps(quarters_summary, indent=2)}
+
+AGGREGATED FINANCIAL DATA:
+{json.dumps(aggregated_data, indent=2)}
+
+Create a comprehensive fundamental analysis that:
+1. Identifies multi-quarter trends in revenue, earnings, and margins
+2. Evaluates the consistency and quality of financial performance
+3. Assesses balance sheet evolution and capital allocation
+4. Highlights strategic developments and competitive positioning
+5. Projects future performance based on historical trends
+6. Assesses data quality based on completeness, consistency, and reliability across quarters
+
+DATA QUALITY ASSESSMENT INSTRUCTIONS:
+- Analyze the consistency of financial statement data across quarters
+- Evaluate the completeness of key financial metrics (revenue, earnings, balance sheet items)
+- Assess the reliability of reported numbers (check for unusual patterns, restatements, or gaps)
+- Consider the quality of disclosure and footnote information
+- Rate the overall data quality based on XBRL completeness and SEC filing consistency
+
+IMPORTANT: Respond ONLY with valid JSON, no explanatory text before or after.
+Provide analysis in the following exact JSON format:
+{{
+    "financial_health_score": float (1-10),
+    "business_quality_score": float (1-10),
+    "growth_prospects_score": float (1-10),
+    "data_quality_score": {{
+        "score": float (1-10),
+        "explanation": "Assessment of financial data quality, completeness, and reliability across quarters"
+    }},
+    "overall_score": float (1-10),
+    "trend_analysis": {{
+        "revenue_trend": "accelerating|stable|decelerating",
+        "margin_trend": "expanding|stable|contracting",
+        "cash_flow_trend": "improving|stable|deteriorating"
+    }},
+    "key_insights": ["list of 5-7 key insights from trend analysis"],
+    "key_risks": ["list of 3-5 key risks identified"],
+    "investment_thesis": "comprehensive investment thesis based on trends",
+    "confidence_level": "HIGH|MEDIUM|LOW",
+    "analysis_summary": "executive summary of findings"
+}}
+"""
+            
+            # Submit comprehensive analysis to LLM
+            model_name = self.config.ollama.models.get(
+                'fundamental_analysis', 
+                'llama3.1:8b-instruct-q8_0'
+            )
+            
+            # Use queue-based processing for comprehensive analysis
+            from patterns.llm.llm_interfaces import LLMTaskType
+            comprehensive_task_data = {
+                'symbol': symbol,
+                'quarterly_analyses': quarterly_analyses,
+                'aggregated_data': aggregated_data,
+                'prompt': comprehensive_prompt
+            }
+            
+            response = self.ollama.generate_response(
+                task_type=LLMTaskType.COMPREHENSIVE_ANALYSIS,
+                data=comprehensive_task_data
+            )
+            
+            # Extract and validate response based on response structure
+            from utils.json_utils import extract_json_from_text
+            
+            try:
+                # The queue-based generate_response returns structured data directly
+                if isinstance(response, dict):
+                    # If response has structured data directly (from queue processing)
+                    if 'financial_health_score' in response:
+                        result = response.copy()
+                    elif 'response' in response:
+                        # If response is wrapped (legacy query_ollama format)
+                        result = extract_json_from_text(response.get('response', ''))
+                    else:
+                        # Try to extract from the response content
+                        response_content = response.get('content', '') or str(response)
+                        result = extract_json_from_text(response_content)
+                else:
+                    # String response
+                    result = extract_json_from_text(str(response))
+                
+                result['quarterly_analyses'] = quarterly_analyses
+                result['quarters_analyzed'] = len(quarterly_analyses)
+                return result
+                
+            except Exception as e:
+                self.logger.warning(f"Failed to parse comprehensive analysis response: {e}")
+                # Fallback structure
+                return {
+                    'financial_health_score': 5.0,
+                    'business_quality_score': 5.0,
+                    'growth_prospects_score': 5.0,
+                    'overall_score': 5.0,
+                    'analysis_summary': str(response),
+                    'quarterly_analyses': quarterly_analyses,
+                    'quarters_analyzed': len(quarterly_analyses),
+                    'confidence_level': 'LOW'
+                }
+                
+        except Exception as e:
+            self.logger.error(f"Error creating comprehensive analysis: {e}")
+            return {
+                'error': str(e),
+                'quarterly_analyses': quarterly_analyses
+            }

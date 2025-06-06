@@ -238,19 +238,73 @@ class InternalToLLMAdapter(IDataFormatAdapter):
         """Format a financial statement section"""
         lines = []
         
-        for key, value in data.items():
-            if isinstance(value, dict) and 'value' in value:
-                amount = value['value']
-                if isinstance(amount, (int, float)):
-                    formatted_value = f"${amount:,.0f}"
-                else:
-                    formatted_value = str(amount)
+        # Handle category-based structure (e.g., income_statement_primary, income_statement_secondary)
+        for category_key, category_data in data.items():
+            if isinstance(category_data, dict):
+                # Check if this is a category with concepts and calculated_metrics
+                if 'concepts' in category_data:
+                    # Format category header
+                    category_name = category_key.replace('_', ' ').title()
+                    lines.append(f"\n#### {category_name}")
+                    
+                    # Format concepts
+                    concepts = category_data.get('concepts', {})
+                    for concept_key, concept_value in concepts.items():
+                        if isinstance(concept_value, dict) and 'value' in concept_value:
+                            amount = concept_value['value']
+                            if isinstance(amount, (int, float)):
+                                formatted_value = f"${amount:,.0f}"
+                            else:
+                                formatted_value = str(amount)
+                            
+                            display_key = concept_key.replace('_', ' ').title()
+                            lines.append(f"- {display_key}: {formatted_value}")
+                    
+                    # Format calculated metrics if present
+                    calculated_metrics = category_data.get('calculated_metrics', {})
+                    if calculated_metrics:
+                        lines.append("\n**Calculated Metrics:**")
+                        for metric_key, metric_data in calculated_metrics.items():
+                            if isinstance(metric_data, dict) and 'value' in metric_data:
+                                value = metric_data['value']
+                                if isinstance(value, (int, float)):
+                                    # Special formatting for different metric types
+                                    if 'eps' in metric_key.lower() or 'book_value_per_share' in metric_key.lower():
+                                        formatted_value = f"${value:.2f}"
+                                    elif 'margin' in metric_key.lower():
+                                        formatted_value = f"{value:.1f}%"
+                                    elif 'ratio' in metric_key.lower() or 'debt_to_equity' in metric_key.lower():
+                                        formatted_value = f"{value:.2f}"
+                                    elif 'working_capital' in metric_key.lower() or metric_data.get('unit') == 'USD':
+                                        formatted_value = f"${value:,.0f}"
+                                    else:
+                                        formatted_value = f"{value:.2f}"
+                                else:
+                                    formatted_value = str(value)
+                                
+                                display_key = metric_key.replace('_', ' ').title()
+                                
+                                # Add calculation info if available
+                                if 'calculation' in metric_data:
+                                    lines.append(f"- {display_key}: {formatted_value} (calc: {metric_data['calculation']})")
+                                else:
+                                    lines.append(f"- {display_key}: {formatted_value}")
                 
-                display_key = key.replace('_', ' ').title()
-                lines.append(f"- {display_key}: {formatted_value}")
-            elif isinstance(value, (int, float)):
-                formatted_value = f"${value:,.0f}"
-                display_key = key.replace('_', ' ').title()
+                # Handle old flat format for backward compatibility
+                elif 'value' in category_data:
+                    amount = category_data['value']
+                    if isinstance(amount, (int, float)):
+                        formatted_value = f"${amount:,.0f}"
+                    else:
+                        formatted_value = str(amount)
+                    
+                    display_key = category_key.replace('_', ' ').title()
+                    lines.append(f"- {display_key}: {formatted_value}")
+                    
+            # Handle simple numeric values
+            elif isinstance(category_data, (int, float)):
+                formatted_value = f"${category_data:,.0f}"
+                display_key = category_key.replace('_', ' ').title()
                 lines.append(f"- {display_key}: {formatted_value}")
         
         return lines

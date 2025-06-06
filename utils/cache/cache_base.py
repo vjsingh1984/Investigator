@@ -128,14 +128,19 @@ class CacheStorageHandler(ABC):
                         'form_type': str(key[3])
                     }
             elif self.cache_type == CacheType.LLM_RESPONSE:
-                # Order: (symbol, llm_type, period, form_type)
+                # Order: (symbol, llm_type, period, form_type, fiscal_year, fiscal_period)
                 if len(key) >= 4:
-                    return {
+                    normalized = {
                         'symbol': str(key[0]),
                         'llm_type': str(key[1]),
                         'period': str(key[2]),
                         'form_type': str(key[3])
                     }
+                    # Include fiscal information if available (for quarterly analysis)
+                    if len(key) >= 6:
+                        normalized['fiscal_year'] = str(key[4])
+                        normalized['fiscal_period'] = str(key[5])
+                    return normalized
             elif self.cache_type == CacheType.TECHNICAL_DATA:
                 # Order: (symbol, data_type)
                 if len(key) >= 2:
@@ -151,11 +156,12 @@ class CacheStorageHandler(ABC):
                         'cik': str(key[1])
                     }
             elif self.cache_type == CacheType.COMPANY_FACTS:
-                # Order: (cik,)
+                # Order: (symbol,) or (symbol, cik) 
                 if len(key) >= 1:
-                    return {
-                        'cik': str(key[0])
-                    }
+                    normalized = {'symbol': str(key[0])}
+                    if len(key) >= 2:
+                        normalized['cik'] = str(key[1])
+                    return normalized
             elif self.cache_type == CacheType.QUARTERLY_METRICS:
                 # Order: (symbol, period)
                 if len(key) >= 2:

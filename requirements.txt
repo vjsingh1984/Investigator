@@ -19,6 +19,7 @@ pyarrow>=13.0.0
 
 # PDF generation
 reportlab>=4.0.0
+markdown>=3.5.0
 
 # Email functionality
 secure-smtplib>=0.1.1

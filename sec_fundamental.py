@@ -35,9 +35,8 @@ from utils.api_client import SECAPIClient
 try:
     from config import get_config
     from utils.db import (
-        get_stock_analysis_dao, 
-        get_llm_response_store_dao,
-        get_sec_response_store_dao,
+        get_llm_responses_dao,
+        get_sec_responses_dao,
         get_quarterly_metrics_dao,
         DatabaseManager
     )
@@ -45,13 +44,14 @@ try:
     from utils.cache.cache_manager import CacheManager
     from utils.cache.cache_types import CacheType
     from patterns.llm.llm_facade import create_llm_facade
-    from utils.db import get_all_companyfacts_store_dao
+    from utils.db import get_sec_companyfacts_dao
     from data.models import (
         FundamentalMetrics,
         FinancialStatementData,
         QuarterlyData
     )
     from patterns.sec.sec_facade import FundamentalAnalysisFacadeV2
+    from utils.ascii_art import ASCIIArt
 except ImportError as e:
     print(f"Import error: {e}")
     print("Please ensure all dependencies are installed and config/utils modules are available")
@@ -78,11 +78,19 @@ def main():
     parser.add_argument("--config", default="config.json", help="Configuration file")
     parser.add_argument("--test-connection", action="store_true", help="Test connections only")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose logging")
+    parser.add_argument("--skip-comprehensive", action="store_true", help="Skip comprehensive analysis, only perform quarterly analysis")
     
     args = parser.parse_args()
     
+    # Display SEC analysis banner
+    ASCIIArt.print_banner('sec')
+    
     if args.verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
+        logging.getLogger().setLevel(logging.INFO)
+    
+    # Enable DEBUG logging for SEC strategies to diagnose hanging issue
+    logging.getLogger('patterns.sec.sec_strategies').setLevel(logging.DEBUG)
+    logging.getLogger('utils.submission_processor').setLevel(logging.DEBUG)
     
     try:
         # Load configuration
@@ -106,11 +114,24 @@ def main():
         
         try:
             # Use the consolidated analyzer
-            result = analyzer.analyze_symbol(args.symbol)
+            result = analyzer.analyze_symbol(args.symbol, skip_comprehensive=args.skip_comprehensive)
             
             if result:
                 main_logger.info(f"✅ Analysis completed successfully for {args.symbol}")
-                main_logger.info(f"📊 Results: {result.get('summary', 'No summary available')}")
+                
+                # Display data quality information if available
+                if 'data_quality' in result:
+                    quality = result['data_quality']
+                    extraction_quality = result.get('extraction_quality', 'N/A')
+                    main_logger.info(f"📊 Data Quality: Extraction={extraction_quality}%, Enhanced={quality.get('completeness_score', 0):.1f}% (Core={quality.get('core_metrics_score', 0):.1f}%)")
+                    
+                    if quality.get('recommendations'):
+                        for rec in quality['recommendations'][:2]:  # Show first 2 recommendations
+                            main_logger.info(f"    {rec}")
+                
+                # Display summary from the correct key
+                summary = result.get('analysis_summary', result.get('investment_thesis', 'No summary available'))
+                main_logger.info(f"📊 Results: {summary}")
                 return 0
             else:
                 main_logger.error(f"❌ Analysis failed for {args.symbol}")

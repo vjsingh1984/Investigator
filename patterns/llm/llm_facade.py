@@ -18,7 +18,7 @@ from .llm_interfaces import (
 )
 from .llm_strategies import (
     ComprehensiveLLMStrategy, QuickLLMStrategy,
-    StandardLLMCacheStrategy, AggressiveLLMCacheStrategy
+    LLMCacheStrategy
 )
 from .llm_processors import QueuedLLMProcessor, StandardLLMAnalysisTemplate
 
@@ -73,12 +73,12 @@ class LLMFacade:
         
         # Create strategy and cache strategy
         self.strategy = self._create_strategy(strategy_type)
-        self.cache_strategy = StandardLLMCacheStrategy(config) if cache_manager else None
+        self.cache_strategy = LLMCacheStrategy(config) if cache_manager else None
         
         # Create processor with observer
         self.processor = QueuedLLMProcessor(
             config=config,
-            num_threads=1,  # Sequential processing to prevent GPU/RAM exhaustion
+            num_threads=config.ollama.num_llm_threads,  # Use configured thread count
             cache_manager=cache_manager,
             cache_strategy=self.cache_strategy
         )
@@ -371,7 +371,13 @@ class LLMFacade:
                 'response': '',
                 'model': model,
                 'processing_time_ms': 0,
-                'error': str(e)
+                'tokens_used': 0,
+                'error': str(e),
+                'metadata': {
+                    'error': str(e),
+                    'model': model,
+                    'timestamp': datetime.now().isoformat()
+                }
             }
     
     def generate(self, model: str, prompt: str, system_prompt: str = None, **kwargs) -> str:

@@ -23,7 +23,9 @@ from .llm_interfaces import (
     LLMRequest, LLMResponse, LLMTaskType, LLMPriority
 )
 from .llm_strategies import ILLMStrategy, ILLMCacheStrategy
+from .llm_model_config import get_model_config_manager
 from utils.api_client import OllamaAPIClient
+from utils.llm_response_processor import get_llm_response_processor
 
 logger = logging.getLogger(__name__)
 
@@ -34,11 +36,81 @@ logger = logging.getLogger(__name__)
 class LLMCacheHandler(ILLMHandler):
     """First handler in chain - checks cache for existing responses"""
     
-    def __init__(self, cache_manager, cache_strategy: ILLMCacheStrategy):
+    def __init__(self, cache_manager, cache_strategy: ILLMCacheStrategy, config=None):
         super().__init__()
         self.cache_manager = cache_manager
         self.cache_strategy = cache_strategy
+        self.config = config
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
+    
+    def _log_to_both(self, symbol: str, message: str, level: str = 'info'):
+        """Log to both symbol-specific and main loggers"""
+        # Log to main logger
+        getattr(self.logger, level)(message)
+        
+        # Log to symbol logger if config is available
+        if self.config and symbol and symbol != 'UNKNOWN':
+            try:
+                symbol_logger = self.config.get_symbol_logger(symbol, 'llm_cache')
+                getattr(symbol_logger, level)(message)
+            except Exception as e:
+                self.logger.debug(f"Failed to log to symbol logger for {symbol}: {e}")
+    
+    def _generate_cache_key_dict(self, request: LLMRequest) -> Dict[str, str]:
+        """Generate dictionary-based cache key consistent with file cache handler"""
+        if not request.metadata:
+            return {}
+        
+        symbol = request.metadata.get('symbol', 'UNKNOWN')
+        task_type = request.metadata.get('task_type', 'unknown')
+        
+        # Map task types to the format expected by file cache handler
+        if task_type in ['quarterly_summary', 'comprehensive_analysis']:
+            # For SEC fundamental analysis
+            llm_type = 'sec'
+            
+            # Try to get form_type and period from metadata
+            form_type = request.metadata.get('form_type', '10-Q')
+            fiscal_year = request.metadata.get('fiscal_year', '')
+            fiscal_period = request.metadata.get('fiscal_period', '')
+            
+            if fiscal_year and fiscal_period:
+                period = f"{fiscal_year}-{fiscal_period}"
+            else:
+                period = request.metadata.get('period', '')
+            
+            # Handle comprehensive analysis
+            if task_type == 'comprehensive_analysis':
+                form_type = 'COMPREHENSIVE'
+                if not period:
+                    period = f"{fiscal_year}-FY" if fiscal_year else "2025-FY"
+            
+            return {
+                'symbol': symbol,
+                'form_type': form_type,
+                'period': period,
+                'llm_type': llm_type
+            }
+        elif task_type == 'technical_analysis':
+            return {
+                'symbol': symbol,
+                'llm_type': 'ta'
+            }
+        elif task_type == 'synthesis':
+            return {
+                'symbol': symbol,
+                'form_type': 'SYNTHESIS',
+                'period': f"{request.metadata.get('fiscal_year', '2025')}-{request.metadata.get('fiscal_period', 'Q1')}",
+                'fiscal_year': request.metadata.get('fiscal_year', 2025),
+                'fiscal_period': request.metadata.get('fiscal_period', 'Q1'),
+                'llm_type': 'full'
+            }
+        else:
+            # Generic fallback
+            return {
+                'symbol': symbol,
+                'llm_type': task_type
+            }
     
     def handle(self, request: LLMRequest) -> Optional[LLMResponse]:
         """Check cache first, pass to next handler if miss"""
@@ -46,14 +118,35 @@ class LLMCacheHandler(ILLMHandler):
             return self._handle_next(request)
         
         try:
-            # Generate cache key
-            cache_key = self.cache_strategy.get_cache_key(request)
+            # Generate dictionary-based cache key (consistent with file handler)
+            cache_key = self._generate_cache_key_dict(request)
             
             # Try to get from cache
-            cached_response = self.cache_manager.get(cache_key, 'llm_response')
+            from utils.cache.cache_types import CacheType
+            cached_response = self.cache_manager.get(CacheType.LLM_RESPONSE, cache_key)
             
             if cached_response:
-                self.logger.info(f"Cache HIT for request {request.request_id}")
+                symbol = request.metadata.get('symbol', 'UNKNOWN') if request.metadata else 'UNKNOWN'
+                task_type = request.metadata.get('task_type', 'unknown') if request.metadata else 'unknown'
+                
+                # Log comprehensive cache hit details
+                cached_tokens = cached_response.get('tokens_used', 0)
+                cached_content_length = len(cached_response.get('content', ''))
+                cache_metadata = cached_response.get('metadata', {})
+                
+                cache_hit_msg = (f"🎯 CACHE HIT - {symbol} {task_type} | "
+                               f"Model: {cached_response.get('model', 'unknown')} | "
+                               f"Tokens: {cached_tokens} | "
+                               f"Response length: {cached_content_length} chars | "
+                               f"Request: {request.request_id[:8]}")
+                self._log_to_both(symbol, cache_hit_msg)
+                
+                # Log cache metadata if available
+                if cache_metadata.get('fiscal_period'):
+                    cache_details_msg = (f"🎯 CACHE HIT DETAILS - {symbol} | "
+                                       f"Fiscal: {cache_metadata.get('fiscal_period')} | "
+                                       f"Cached at: {cache_metadata.get('created_at', 'unknown')}")
+                    self._log_to_both(symbol, cache_details_msg)
                 
                 # Reconstruct LLMResponse from cached data
                 return LLMResponse(
@@ -66,13 +159,83 @@ class LLMCacheHandler(ILLMHandler):
                     timestamp=datetime.utcnow()
                 )
             
-            self.logger.debug(f"Cache MISS for request {request.request_id}")
+            symbol = request.metadata.get('symbol', 'UNKNOWN') if request.metadata else 'UNKNOWN'
+            task_type = request.metadata.get('task_type', 'unknown') if request.metadata else 'unknown'
+            prompt_length = len(request.prompt) + len(request.system_prompt or '')
+            
+            cache_miss_msg = (f"❌ CACHE MISS - {symbol} {task_type} | "
+                           f"Model: {request.model} | "
+                           f"Prompt length: {prompt_length} chars | "
+                           f"Request: {request.request_id[:8]} | "
+                           f"Cache key: {cache_key[:32]}...")
+            self._log_to_both(symbol, cache_miss_msg)
+            
+            # Log additional request details for troubleshooting
+            if request.metadata:
+                fiscal_info = request.metadata.get('fiscal_period', 'N/A')
+                miss_details_msg = (f"❌ CACHE MISS DETAILS - {symbol} | "
+                                  f"Fiscal: {fiscal_info} | "
+                                  f"Task priority: {request.priority.value if hasattr(request.priority, 'value') else 'unknown'}")
+                self._log_to_both(symbol, miss_details_msg)
             
         except Exception as e:
             self.logger.warning(f"Cache check failed: {e}")
         
         # Cache miss or error - pass to next handler
         return self._handle_next(request)
+    
+    def store_response(self, request: LLMRequest, response: LLMResponse):
+        """Store LLM response in cache"""
+        if not self.cache_manager or not self.cache_strategy:
+            return
+        
+        try:
+            if self.cache_strategy.should_cache(request, response):
+                # Generate dictionary-based cache key 
+                cache_key = self._generate_cache_key_dict(request)
+                
+                # Get TTL based on task type
+                task_type = None
+                if request.metadata and 'task_type' in request.metadata:
+                    from .llm_interfaces import LLMTaskType
+                    task_type = LLMTaskType(request.metadata['task_type'])
+                
+                ttl = self.cache_strategy.get_ttl(task_type) if task_type else 86400
+                
+                # Cache response data
+                cache_data = {
+                    'prompt': request.prompt,  # Include prompt for file cache storage
+                    'response': response.content,  # Store actual response content
+                    'content': response.content,  # Keep for backward compatibility
+                    'model': response.model,
+                    'processing_time_ms': response.processing_time_ms,
+                    'tokens_used': response.tokens_used,
+                    'metadata': response.metadata,
+                    'timestamp': response.timestamp.isoformat() if response.timestamp else None,
+                    'model_info': {  # Add model info for comprehensive caching
+                        'model': response.model,
+                        'temperature': getattr(request, 'temperature', 0.3),
+                        'top_p': getattr(request, 'top_p', 0.9)
+                    }
+                }
+                
+                from utils.cache.cache_types import CacheType
+                success = self.cache_manager.set(CacheType.LLM_RESPONSE, cache_key, cache_data)
+                symbol = request.metadata.get('symbol', 'UNKNOWN') if request.metadata else 'UNKNOWN'
+                task_type_str = request.metadata.get('task_type', 'unknown') if request.metadata else 'unknown'
+                
+                if success:
+                    cache_write_msg = (f"💾 CACHE STORE - {symbol} {task_type_str} | "
+                                     f"Size: {len(response.content)} chars | "
+                                     f"Tokens: {response.tokens_used} | "
+                                     f"TTL: {ttl//86400}d")
+                    self._log_to_both(symbol, cache_write_msg)
+                else:
+                    cache_fail_msg = (f"❌ CACHE STORE FAILED - {symbol} {task_type_str}")
+                    self._log_to_both(symbol, cache_fail_msg, 'warning')
+                
+        except Exception as e:
+            self.logger.warning(f"Failed to store LLM response in cache: {e}")
 
 class LLMValidationHandler(ILLMHandler):
     """Second handler - validates request parameters"""
@@ -133,50 +296,263 @@ class LLMValidationHandler(ILLMHandler):
 class LLMExecutionHandler(ILLMHandler):
     """Final handler - executes the LLM request"""
     
-    def __init__(self, config, cache_manager=None, cache_strategy: ILLMCacheStrategy = None):
+    def __init__(self, config, cache_handler=None):
         super().__init__()
         self.config = config
-        self.cache_manager = cache_manager
-        self.cache_strategy = cache_strategy
+        self.cache_handler = cache_handler  # Delegate all cache operations to this
         self.api_client = OllamaAPIClient(config=config)
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
+        self.model_capabilities_cache = {}  # Cache model info to avoid repeated API calls
+        self.model_config_manager = get_model_config_manager()
+        self.response_processor = get_llm_response_processor()
+    
+    def _log_to_both(self, symbol: str, message: str, level: str = 'info'):
+        """Log to both symbol-specific and main loggers"""
+        # Log to main logger
+        getattr(self.logger, level)(message)
+        
+        # Log to symbol logger if config is available
+        if self.config and symbol and symbol != 'UNKNOWN':
+            try:
+                symbol_logger = self.config.get_symbol_logger(symbol, 'llm_execution')
+                getattr(symbol_logger, level)(message)
+            except Exception as e:
+                self.logger.debug(f"Failed to log to symbol logger for {symbol}: {e}")
+    
+    def get_model_capabilities(self, model_name: str) -> Dict[str, Any]:
+        """Get and cache model capabilities from Ollama API"""
+        if model_name in self.model_capabilities_cache:
+            return self.model_capabilities_cache[model_name]
+        
+        try:
+            capabilities = self.api_client.get_model_capabilities(model_name)
+            self.model_capabilities_cache[model_name] = capabilities
+            
+            self.logger.info(f"🔍 MODEL INFO - {model_name}: context_size={capabilities['context_size']}, available={capabilities['available']}")
+            if capabilities.get('parameter_size'):
+                self.logger.info(f"🔍 MODEL INFO - {model_name}: parameter_size={capabilities['parameter_size']}")
+            
+            # Log memory requirements if available
+            memory_req = capabilities.get('memory_requirements', {})
+            if memory_req:
+                self.logger.info(f"🔍 MEMORY INFO - {model_name}: estimated={memory_req.get('total_estimated_gb', 0)}GB, "
+                               f"system={memory_req.get('system_memory_gb', 0)}GB, "
+                               f"sufficient={memory_req.get('memory_sufficient', True)}")
+                
+                if not memory_req.get('memory_sufficient', True):
+                    self.logger.warning(f"⚠️ MEMORY WARNING - {model_name} may require {memory_req.get('total_estimated_gb', 0)}GB "
+                                      f"but system only has {memory_req.get('system_memory_gb', 0)}GB available")
+            
+            return capabilities
+        except Exception as e:
+            self.logger.error(f"Failed to get model capabilities for {model_name}: {e}")
+            # Return conservative defaults
+            fallback = {
+                'model_name': model_name,
+                'context_size': 4096,
+                'parameter_size': 0,
+                'available': True,  # Assume available for fallback
+                'error': str(e)
+            }
+            self.model_capabilities_cache[model_name] = fallback
+            return fallback
+    
+    def calculate_dynamic_context_size(self, request: LLMRequest) -> Dict[str, int]:
+        """Calculate appropriate context size based on model capabilities and prompt length"""
+        # First try our known model configurations
+        task_type = request.metadata.get('task_type', 'general')
+        if hasattr(task_type, 'value'):
+            task_type = task_type.value
+        
+        # Map LLMTaskType values to our config task types
+        task_type_map = {
+            'comprehensive_analysis': 'sec',
+            'quarterly_summary': 'sec',
+            'technical_analysis': 'ta',
+            'synthesis': 'synthesis'
+        }
+        config_task_type = task_type_map.get(task_type, 'general')
+        
+        # Use enhanced model configuration
+        context_params = self.model_config_manager.get_optimal_context_size(
+            model_name=request.model,
+            prompt_length=len(request.prompt) + len(request.system_prompt or ''),
+            desired_output=request.num_predict,
+            task_type=config_task_type
+        )
+        
+        # Also get capabilities from Ollama API for comparison
+        model_caps = self.get_model_capabilities(request.model)
+        api_context = model_caps.get('context_size', 4096)
+        
+        # Calculate actual prompt size (including system prompt)
+        prompt_tokens = len(request.prompt) // 4  # Rough estimation: 4 chars per token
+        system_tokens = len(request.system_prompt or '') // 4
+        total_input_tokens = prompt_tokens + system_tokens
+        
+        # Log the comparison
+        self.logger.info(
+            f"🔍 CONTEXT CONFIG - Model: {request.model}, Task: {config_task_type}, "
+            f"Config context: {context_params['num_ctx']}, API context: {api_context}, "
+            f"Num predict: {context_params['num_predict']}"
+        )
+        
+        self.logger.info(
+            f"🔍 PROMPT SIZE - Input tokens: ~{total_input_tokens}, "
+            f"Output tokens: {context_params['num_predict']}, "
+            f"Total: ~{total_input_tokens + context_params['num_predict']}"
+        )
+        
+        # Use the actual model context size from API
+        context_params['num_ctx'] = api_context
+        
+        # Validate that the total required context fits within model limits
+        total_required = total_input_tokens + context_params['num_predict']
+        if total_required > api_context:
+            self.logger.warning(
+                f"⚠️ CONTEXT WARNING - Total required tokens (~{total_required}) exceeds model context ({api_context}). "
+                f"Prompt may be truncated by Ollama."
+            )
+            
+            # Adjust num_predict to fit within context if possible
+            max_output = api_context - total_input_tokens - 100  # Leave small buffer
+            if max_output > 0:
+                context_params['num_predict'] = min(context_params['num_predict'], max_output)
+                self.logger.info(f"🔧 CONTEXT ADJUSTMENT - Reduced num_predict to {context_params['num_predict']} to fit context")
+            else:
+                self.logger.error(f"❌ CONTEXT ERROR - Input prompt (~{total_input_tokens} tokens) exceeds model context ({api_context})")
+        
+        return context_params
     
     def handle(self, request: LLMRequest) -> Optional[LLMResponse]:
         """Execute LLM request via API"""
         start_time = time.time()
         
         try:
+            # Calculate dynamic context size
+            context_params = self.calculate_dynamic_context_size(request)
+            
             # Prepare API request
             api_request = {
                 'model': request.model,
                 'prompt': request.prompt,
+                'stream': False,
                 'options': {
                     'temperature': request.temperature,
-                    'top_p': request.top_p
+                    'top_p': request.top_p,
+                    'num_ctx': request.num_ctx or context_params['num_ctx'],  # Use dynamic context if not specified
+                    'num_predict': request.num_predict or context_params['num_predict']  # Use optimized prediction size
                 }
             }
             
             if request.system_prompt:
                 api_request['system'] = request.system_prompt
             
-            if request.num_ctx:
-                api_request['options']['num_ctx'] = request.num_ctx
+            # Log comprehensive request details being sent to Ollama
+            import json
+            symbol = request.metadata.get('symbol', 'UNKNOWN') if request.metadata else 'UNKNOWN'
+            task_type = request.metadata.get('task_type', 'unknown') if request.metadata else 'unknown'
+            prompt_length = len(api_request.get('prompt', ''))
+            system_length = len(api_request.get('system', ''))
             
-            if request.num_predict:
-                api_request['options']['num_predict'] = request.num_predict
+            execute_msg = (f"🚀 LLM EXECUTE - {symbol} {task_type} | "
+                           f"Model: {request.model} | "
+                           f"Prompt: {prompt_length} chars | "
+                           f"System: {system_length} chars | "
+                           f"Total input: {prompt_length + system_length} chars | "
+                           f"Request: {request.request_id[:8]}")
+            self._log_to_both(symbol, execute_msg)
+            
+            context_msg = (f"🚀 LLM CONTEXT - {symbol} | "
+                           f"Context size: {api_request['options']['num_ctx']} | "
+                           f"Max output: {api_request['options']['num_predict']} | "
+                           f"Temperature: {api_request['options']['temperature']} | "
+                           f"Top-p: {api_request['options']['top_p']}")
+            self._log_to_both(symbol, context_msg)
+            
+            self.logger.debug(f"🔍 OLLAMA API DEBUG - Request options: {json.dumps(api_request['options'], indent=2)}")
             
             # Execute request
-            response_data = self.api_client.post('/api/generate', api_request, timeout=request.timeout)
+            response_data = self.api_client.post_json('/api/generate', json=api_request, timeout=request.timeout)
             
             processing_time = int((time.time() - start_time) * 1000)
+            
+            # Extract token and timing information from Ollama response
+            prompt_eval_count = response_data.get('prompt_eval_count', 0)
+            eval_count = response_data.get('eval_count', 0)
+            total_tokens = prompt_eval_count + eval_count
+            response_content = response_data.get('response', '')
+            response_length = len(response_content)
+            
+            # Calculate timing details
+            prompt_eval_duration = response_data.get('prompt_eval_duration', 0) / 1_000_000  # Convert to ms
+            eval_duration = response_data.get('eval_duration', 0) / 1_000_000  # Convert to ms
+            total_duration = response_data.get('total_duration', 0) / 1_000_000  # Convert to ms
+            load_duration = response_data.get('load_duration', 0) / 1_000_000  # Convert to ms
+            
+            # Log comprehensive response details
+            complete_msg = (f"✅ LLM COMPLETE - {symbol} {task_type} | "
+                           f"Processing: {processing_time}ms | "
+                           f"Input tokens: {prompt_eval_count} | "
+                           f"Output tokens: {eval_count} | "
+                           f"Total tokens: {total_tokens} | "
+                           f"Response: {response_length} chars")
+            self._log_to_both(symbol, complete_msg)
+            
+            timing_msg = (f"✅ LLM TIMING - {symbol} | "
+                         f"Load: {load_duration:.1f}ms | "
+                         f"Prompt eval: {prompt_eval_duration:.1f}ms | "
+                         f"Generation: {eval_duration:.1f}ms | "
+                         f"Total: {total_duration:.1f}ms")
+            self._log_to_both(symbol, timing_msg)
+            
+            # Calculate and log efficiency metrics
+            if eval_count > 0 and eval_duration > 0:
+                tokens_per_second = eval_count / (eval_duration / 1000)
+                efficiency_msg = (f"✅ LLM EFFICIENCY - {symbol} | "
+                                f"Generation speed: {tokens_per_second:.1f} tokens/sec | "
+                                f"Context utilization: {total_tokens}/{api_request['options']['num_ctx']} ({(total_tokens/api_request['options']['num_ctx']*100):.1f}%)")
+                self._log_to_both(symbol, efficiency_msg)
+            
+            # Analyze response structure for JSON responses
+            response_keys = []
+            try:
+                if response_content.strip().startswith('{'):
+                    import json
+                    parsed_response = json.loads(response_content)
+                    response_keys = list(parsed_response.keys()) if isinstance(parsed_response, dict) else []
+                    json_keys_msg = (f"✅ LLM JSON KEYS - {symbol} | "
+                                   f"Response keys: {response_keys[:10]} | "  # Limit to first 10 keys
+                                   f"Total keys: {len(response_keys)}")
+                    self._log_to_both(symbol, json_keys_msg)
+            except:
+                # Not JSON or parsing failed - that's fine
+                pass
+            
+            self.logger.debug(f"🔍 OLLAMA API DEBUG - Full response keys: {list(response_data.keys()) if response_data else 'None'}")
+            self.logger.debug(f"🔍 OLLAMA API DEBUG - Response preview: '{response_content[:200]}...' " if len(response_content) > 200 else f"'{response_content}'")
+            
+            # Add token details to metadata
+            enhanced_metadata = request.metadata or {}
+            enhanced_metadata['tokens'] = {
+                'input': prompt_eval_count,
+                'output': eval_count,
+                'total': total_tokens
+            }
+            enhanced_metadata['timings'] = {
+                'prompt_eval_duration': response_data.get('prompt_eval_duration', 0),
+                'eval_duration': response_data.get('eval_duration', 0),
+                'total_duration': response_data.get('total_duration', 0),
+                'load_duration': response_data.get('load_duration', 0)
+            }
             
             # Create response object
             response = LLMResponse(
                 content=response_data.get('response', ''),
                 model=request.model,
                 processing_time_ms=processing_time,
-                tokens_used=response_data.get('tokens', 0),
-                metadata=request.metadata,
+                tokens_used=total_tokens,
+                metadata=enhanced_metadata,
                 request_id=request.request_id,
                 timestamp=datetime.utcnow()
             )
@@ -200,36 +576,9 @@ class LLMExecutionHandler(ILLMHandler):
             )
     
     def _cache_response(self, request: LLMRequest, response: LLMResponse):
-        """Cache response if caching is enabled and appropriate"""
-        if not self.cache_manager or not self.cache_strategy:
-            return
-        
-        try:
-            if self.cache_strategy.should_cache(request, response):
-                cache_key = self.cache_strategy.get_cache_key(request)
-                
-                # Get TTL based on task type
-                task_type = None
-                if request.metadata and 'task_type' in request.metadata:
-                    task_type = LLMTaskType(request.metadata['task_type'])
-                
-                ttl = self.cache_strategy.get_ttl(task_type) if task_type else 86400
-                
-                # Cache response data
-                cache_data = {
-                    'content': response.content,
-                    'model': response.model,
-                    'processing_time_ms': response.processing_time_ms,
-                    'tokens_used': response.tokens_used,
-                    'metadata': response.metadata,
-                    'timestamp': response.timestamp.isoformat() if response.timestamp else None
-                }
-                
-                self.cache_manager.set(cache_key, cache_data, 'llm_response', ttl=ttl)
-                self.logger.debug(f"Cached LLM response with key {cache_key[:16]}...")
-                
-        except Exception as e:
-            self.logger.warning(f"Failed to cache LLM response: {e}")
+        """Delegate cache storage to cache handler"""
+        if self.cache_handler:
+            self.cache_handler.store_response(request, response)
 
 # ============================================================================
 # Queue-Based Processor with Observer Pattern
@@ -256,9 +605,9 @@ class QueuedLLMProcessor(ILLMProcessor, ILLMSubject):
     def _create_handler_chain(self, cache_manager, cache_strategy) -> ILLMHandler:
         """Create processing handler chain"""
         # Create handlers
-        cache_handler = LLMCacheHandler(cache_manager, cache_strategy) if cache_manager else None
+        cache_handler = LLMCacheHandler(cache_manager, cache_strategy, self.config) if cache_manager else None
         validation_handler = LLMValidationHandler()
-        execution_handler = LLMExecutionHandler(self.config, cache_manager, cache_strategy)
+        execution_handler = LLMExecutionHandler(self.config, cache_handler)
         
         # Chain handlers
         if cache_handler:

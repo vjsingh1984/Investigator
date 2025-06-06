@@ -1,0 +1,97 @@
+graph TB
+    subgraph "Russell 1000 Classifications"
+        RUSSELL[📊 russell_1000_peer_groups.json]
+        SECTORS[🏭 11 Sectors]
+        INDUSTRIES[🏢 50+ Industries]
+        COMPANIES[🏪 Large/Mid Cap Classifications]
+    end
+    
+    subgraph "Peer Group Analysis Entry Points"
+        CLI_FAST[⚡ --peer-groups-fast]
+        CLI_COMP[🔬 --peer-groups-analysis]
+        CLI_REPORTS[📄 --peer-groups-reports]
+    end
+    
+    subgraph "Analysis Modes"
+        FAST_MODE[🏃 Fast Mode<br/>Synthesis Only<br/>~3 seconds per symbol]
+        COMP_MODE[🔬 Comprehensive Mode<br/>SEC + Technical + Synthesis<br/>~5 minutes per symbol]
+    end
+    
+    subgraph "Peer Analysis Pipeline"
+        PEER_SELECT[🎯 Select Peer Group<br/>By Sector/Industry]
+        SYMBOL_LOOP[🔄 For Each Symbol in Group]
+        FULL_PIPELINE[⚙️ Run Full Analysis Pipeline]
+        CACHE_RESULTS[💾 Cache All Results]
+        PEER_CALC[🧮 Calculate Peer Metrics]
+    end
+    
+    subgraph "Peer Relative Analysis"
+        AVG_CALC[📊 Calculate Peer Averages<br/>P/E, P/B, ROE, Debt/Equity]
+        DISCOUNT_CALC[💰 Calculate Discount/Premium<br/>vs Peer Group]
+        ADJ_TARGETS[🎯 Adjust Price Targets<br/>Based on Peer Positioning]
+        RANKING[📈 Rank Within Peer Group]
+    end
+    
+    subgraph "Report Generation"
+        PDF_GEN[📄 Generate PDF Reports]
+        CHARTS_3D[📊 3D Positioning Charts<br/>Financial Health × Growth × Valuation]
+        CHARTS_2D[📈 2D Scatter Plots<br/>Technical vs Fundamental Scores]
+        TABLES[📋 Comparative Tables<br/>Peer Relative Metrics]
+    end
+    
+    subgraph "File Naming & Storage"
+        CLEAN_NAMES[🏷️ Clean Filenames<br/>No Timestamps]
+        BACKUP_UTIL[💾 Optional Backup Utility<br/>Timestamped Versions]
+        REPORTS_DIR[📁 reports/ Directory]
+    end
+    
+    %% Main flow connections
+    RUSSELL --> SECTORS
+    SECTORS --> INDUSTRIES
+    INDUSTRIES --> COMPANIES
+    
+    CLI_FAST --> FAST_MODE
+    CLI_COMP --> COMP_MODE
+    CLI_REPORTS --> PDF_GEN
+    
+    FAST_MODE --> PEER_SELECT
+    COMP_MODE --> PEER_SELECT
+    
+    PEER_SELECT --> SYMBOL_LOOP
+    SYMBOL_LOOP --> FULL_PIPELINE
+    FULL_PIPELINE --> CACHE_RESULTS
+    CACHE_RESULTS --> PEER_CALC
+    
+    PEER_CALC --> AVG_CALC
+    AVG_CALC --> DISCOUNT_CALC
+    DISCOUNT_CALC --> ADJ_TARGETS
+    ADJ_TARGETS --> RANKING
+    
+    RANKING --> PDF_GEN
+    PDF_GEN --> CHARTS_3D
+    PDF_GEN --> CHARTS_2D
+    PDF_GEN --> TABLES
+    
+    CHARTS_3D --> CLEAN_NAMES
+    CHARTS_2D --> CLEAN_NAMES
+    TABLES --> CLEAN_NAMES
+    
+    CLEAN_NAMES --> REPORTS_DIR
+    CLEAN_NAMES --> BACKUP_UTIL
+    
+    %% Styling
+    classDef russell fill:#e8f5e8,stroke:#4caf50,stroke-width:2px
+    classDef entry fill:#e3f2fd,stroke:#2196f3,stroke-width:2px
+    classDef mode fill:#f3e5f5,stroke:#9c27b0,stroke-width:2px
+    classDef pipeline fill:#fff3e0,stroke:#ff9800,stroke-width:2px
+    classDef analysis fill:#fce4ec,stroke:#e91e63,stroke-width:2px
+    classDef report fill:#e0f2f1,stroke:#009688,stroke-width:2px
+    classDef storage fill:#f1f8e9,stroke:#689f38,stroke-width:2px
+    
+    class RUSSELL,SECTORS,INDUSTRIES,COMPANIES russell
+    class CLI_FAST,CLI_COMP,CLI_REPORTS entry
+    class FAST_MODE,COMP_MODE mode
+    class PEER_SELECT,SYMBOL_LOOP,FULL_PIPELINE,CACHE_RESULTS,PEER_CALC pipeline
+    class AVG_CALC,DISCOUNT_CALC,ADJ_TARGETS,RANKING analysis
+    class PDF_GEN,CHARTS_3D,CHARTS_2D,TABLES report
+    class CLEAN_NAMES,BACKUP_UTIL,REPORTS_DIR storage

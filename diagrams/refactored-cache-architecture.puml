@@ -1,0 +1,103 @@
+@startuml refactored-cache-architecture
+!theme aws-orange
+
+title InvestiGator - Refactored Cache Architecture\n(Direct Cache Manager Operations - No Wrapper Methods)
+
+package "Application Layer" {
+  [InvestiGator.sh] as shell
+  [SEC Fundamental Analysis] as sec
+  [Technical Analysis] as tech
+  [Synthesis Engine] as synth
+  [Peer Group Analysis] as peer
+}
+
+package "Cache System" {
+  [Cache Manager] as manager
+  note right of manager : Single point of cache operations\nget(CacheType, key)\nset(CacheType, key, value)\nexists(CacheType, key)\ndelete(CacheType, key)
+  
+  package "Storage Handlers" {
+    [File Cache Handler] as file
+    [Parquet Cache Handler] as parquet
+    [RDBMS Cache Handler] as rdbms
+  }
+  
+  package "Cache Types" {
+    [LLM_RESPONSE] as llm_type
+    [COMPANY_FACTS] as facts_type
+    [SEC_RESPONSE] as sec_type
+    [TECHNICAL_DATA] as tech_type
+    [SUBMISSION_DATA] as sub_type
+    [QUARTERLY_METRICS] as metrics_type
+  }
+}
+
+package "Storage Backends" {
+  database "PostgreSQL\n(Priority: 10)" as postgres
+  folder "Compressed Files\n(Priority: 20)" as disk
+  folder "Parquet Files\n(Priority: 15)" as parquet_files
+}
+
+package "External APIs" {
+  [SEC EDGAR API] as sec_api
+  [Yahoo Finance API] as yahoo_api
+}
+
+' Application connections - Direct to Cache Manager
+shell --> manager : Direct cache operations
+sec --> manager : cache_manager.get/set/exists
+tech --> manager : cache_manager.get/set/exists
+synth --> manager : cache_manager.get/set/exists
+peer --> manager : cache_manager.get/set/exists
+
+' Cache Manager to Handlers
+manager --> file : Priority-based\nselection
+manager --> parquet : Technical data only
+manager --> rdbms : Database storage
+
+' Handlers to Storage
+file --> disk : gzip compression\nlevel 9
+parquet --> parquet_files : Apache Parquet\ncolumnar format
+rdbms --> postgres : JSONB compression
+
+' External API connections
+sec --> sec_api : Direct API calls\n(cache miss)
+tech --> yahoo_api : Direct API calls\n(cache miss)
+
+' Cache flow annotations
+note bottom of manager
+**Performance Characteristics:**
+• File Cache: 10-50ms access
+• Parquet Cache: 15-30ms access  
+• RDBMS Cache: 50-200ms access
+• Hit Rate: 85-95% typical
+• Compression: 70-80% reduction
+end note
+
+note bottom of disk
+**File Cache Patterns:**
+• {symbol}_{cik}.json.gz
+• {symbol}_{llm_type}.json.gz
+• {symbol}_{analysis_date}.json.gz
+• CIK resolution via TickerCIKMapper
+end note
+
+note bottom of postgres
+**Database Schema:**
+• llm_responses (prompts + responses)
+• sec_companyfacts (company data)
+• quarterly_metrics (financial data)
+• technical_data_cache (market data)
+• Automatic compression via JSONB
+end note
+
+' Removed cache facade note
+note top of manager
+🗑️ **Cache Facade Removed**
+No more wrapper methods!
+All modules use cache manager directly:
+• cache_manager.get(CacheType.LLM_RESPONSE, key)
+• cache_manager.set(CacheType.COMPANY_FACTS, key, data)
+• cache_manager.exists(CacheType.SEC_RESPONSE, key)
+end note
+
+@enduml

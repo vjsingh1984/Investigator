@@ -1,0 +1,206 @@
+= Apple Silicon Setup Guide
+:toc:
+:icons: font
+
+== Overview
+
+InvestiGator has been optimized for Apple Silicon (M1, M2, M3) MacBooks with unified memory architecture. This guide covers the setup process and optimization considerations specific to Apple Silicon Macs.
+
+== FAISS Compatibility
+
+=== ✅ What Works
+* `faiss-cpu` package is fully supported on Apple Silicon (arm64)
+* CPU-based similarity search and vector indexing
+* Integration with unified memory architecture
+* Full compatibility with InvestiGator's vector database features
+
+=== ❌ What Doesn't Work
+* `faiss-gpu` package (requires CUDA, not available on macOS)
+* Some x86_64 optimizations (AVX2, AVX512)
+
+== Installation Options
+
+=== Option 1: Using Conda (Recommended)
+Conda provides better Apple Silicon optimization:
+
+[source,bash]
+----
+# Install Miniconda for Apple Silicon
+curl -O https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-arm64.sh
+bash Miniconda3-latest-MacOSX-arm64.sh
+
+# Use InvestiGator's automated setup
+./investigator.sh --setup-system
+./investigator.sh --setup-vectordb
+----
+
+=== Option 2: Using pip
+Standard installation using pip:
+
+[source,bash]
+----
+./investigator.sh --setup-system
+./investigator.sh --setup-vectordb
+----
+
+The setup script automatically detects Apple Silicon and installs:
+* `faiss-cpu` with Apple Silicon optimizations
+* `sentence-transformers` for embedding generation
+* `python-rocksdb` for vector storage
+
+== Performance Considerations
+
+=== Unified Memory Architecture
+* **Advantage**: CPU and other components share the same memory pool
+* **Current State**: FAISS doesn't have specific optimizations for unified memory yet
+* **Impact**: May be slower than x86_64 systems with dedicated GPUs
+
+=== SIMD Optimizations
+* **Available**: Generic optimizations only
+* **Not Available**: AVX2/AVX512 (x86_64 specific)
+* **Recommendation**: Use conda for better ARM optimizations
+
+=== Expected Performance
+* Similarity search: Adequate for most use cases
+* Large indexes (>1GB): May be slower than CUDA-enabled systems
+* Embedding generation: Good performance with SentenceTransformers
+
+== Testing Your Setup
+
+Run the Apple Silicon specific test suite:
+
+[source,bash]
+----
+python test_apple_silicon_setup.py
+----
+
+This will verify:
+* Architecture detection
+* FAISS compatibility
+* Vector database directory structure
+* Python environment readiness
+
+== Optimization Tips
+
+=== 1. Use Conda
+Conda provides better ARM64 optimizations than pip:
+
+[source,bash]
+----
+conda install -c pytorch faiss-cpu
+----
+
+=== 2. Monitor Memory Usage
+Unified memory is shared between CPU and GPU:
+
+[source,bash]
+----
+# Monitor memory usage during vector operations
+activity monitor
+# or
+htop
+----
+
+=== 3. Batch Processing
+Process vectors in smaller batches to optimize memory usage:
+
+[source,python]
+----
+# In config.py, adjust batch_size for Apple Silicon
+vector_db:
+  batch_size: 16  # Smaller batches for unified memory
+  max_search_results: 50
+----
+
+== Troubleshooting
+
+=== FAISS Installation Issues
+
+**Problem**: `pip install faiss-cpu` fails
+
+**Solution**: 
+[source,bash]
+----
+# Try conda installation
+conda install -c pytorch faiss-cpu
+
+# Or use Homebrew
+brew install faiss
+----
+
+=== Performance Issues
+
+**Problem**: Vector search is slow
+
+**Solutions**:
+1. Use conda instead of pip
+2. Reduce batch sizes
+3. Consider index optimization
+4. Monitor memory pressure
+
+=== Import Errors
+
+**Problem**: `ImportError: No module named 'faiss'`
+
+**Solution**:
+[source,bash]
+----
+# Verify installation
+python -c "import faiss; print(faiss.__version__)"
+
+# Reinstall if needed
+pip uninstall faiss-cpu
+./investigator.sh --setup-vectordb
+----
+
+== Configuration
+
+Add Apple Silicon specific settings to `config.json`:
+
+[source,json]
+----
+{
+  "vector_db": {
+    "enabled": true,
+    "embedding_model": "all-MiniLM-L6-v2",
+    "batch_size": 16,
+    "max_search_results": 50,
+    "similarity_threshold": 0.5
+  }
+}
+----
+
+== Verification
+
+After setup, verify everything works:
+
+[source,bash]
+----
+# Test the complete setup
+./investigator.sh --test-system
+
+# Test vector database specifically
+python test_data_collector.py
+
+# Run Apple Silicon specific tests
+python test_apple_silicon_setup.py
+----
+
+== Support
+
+If you encounter issues specific to Apple Silicon:
+
+1. Check the test output for specific error messages
+2. Ensure you're using the latest version of dependencies
+3. Consider using conda for better ARM64 support
+4. Monitor system resources during vector operations
+
+== Future Improvements
+
+The InvestiGator team is monitoring developments in:
+* Native Apple Silicon optimizations in FAISS
+* Metal Performance Shaders integration
+* Unified memory specific optimizations
+* ARM64 SIMD improvements
+
+These improvements will be integrated as they become available in the ecosystem.

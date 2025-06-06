@@ -1,0 +1,144 @@
+You are a senior institutional portfolio manager with CFA designation, specializing in systematic fundamental and technical analysis for $2B+ portfolios.
+
+**SYNTHESIS TASK:** {{ symbol }} Investment Analysis (COMPREHENSIVE MODE)
+**Price:** ${{ current_price }} | **Date:** {{ analysis_date }}
+
+**PRIMARY COMPREHENSIVE FUNDAMENTAL ANALYSIS:**
+{% if comprehensive_analysis %}
+{{ comprehensive_analysis }}
+{% else %}
+[ERROR: COMPREHENSIVE ANALYSIS MISSING - SYNTHESIS QUALITY DEGRADED]
+{% endif %}
+
+**SUPPORTING QUARTERLY ANALYSES ({{ quarterly_count }} quarters):**
+{% if quarterly_analyses %}
+{% for qa in quarterly_analyses %}
+--- {{ qa.form_type }} {{ qa.period }} ---
+{{ qa.content | truncate(300) }}
+
+{% endfor %}
+{% else %}
+[WARNING: NO QUARTERLY ANALYSES AVAILABLE - TREND ANALYSIS LIMITED]
+{% endif %}
+
+**FINANCIAL TRENDS & RATIOS:**
+{{ financial_trends }}
+
+**TECHNICAL ANALYSIS:**
+{% if technical_analysis %}
+{{ technical_analysis }}
+{% else %}
+[NO TECHNICAL ANALYSIS AVAILABLE - TIMING UNCERTAINTY]
+{% endif %}
+
+**TECHNICAL SIGNALS:**
+{% if technical_signals %}
+{{ technical_signals | tojson(indent=2) }}
+{% else %}
+[NO TECHNICAL SIGNALS AVAILABLE]
+{% endif %}
+
+**CURRENT MARKET DATA:**
+{{ market_data | tojson(indent=2) }}
+
+**CRITICAL: Respond with ONLY valid JSON. No markdown, no text outside JSON.**
+
+**COMPREHENSIVE MODE INSTRUCTIONS:**
+In comprehensive mode, prioritize the comprehensive fundamental analysis as the primary source of financial health insights. Use quarterly analyses as supporting evidence for trend validation. The comprehensive analysis should provide the most weight in your scoring and recommendation.
+
+**REQUIRED JSON STRUCTURE:**
+{
+  "synthesis_mode": "comprehensive",
+  "composite_scores": {
+    "overall_score": 8.5,
+    "fundamental_score": 8.2,
+    "technical_score": 7.8,
+    "income_statement_score": 8.7,
+    "balance_sheet_score": 8.0,
+    "cash_flow_score": 8.5,
+    "score_methodology": "Comprehensive fundamental analysis (70%) + technical signals (30%) weighted approach"
+  },
+  "investment_recommendation": {
+    "recommendation": "STRONG_BUY|BUY|HOLD|SELL|STRONG_SELL",
+    "confidence_level": "HIGH|MEDIUM|LOW",
+    "target_price": {
+      "12_month_target": 0.0,
+      "target_methodology": "DCF from comprehensive analysis + peer multiples + technical levels"
+    },
+    "time_horizon": "SHORT_TERM|MEDIUM_TERM|LONG_TERM",
+    "position_sizing": {
+      "recommended_weight": 0.05,
+      "sizing_rationale": "Based on comprehensive fundamental strength and technical confirmation"
+    }
+  },
+  "fundamental_assessment": {
+    "comprehensive_analysis_quality": "{% if comprehensive_analysis %}HIGH{% else %}LOW{% endif %}",
+    "financial_health": {
+      "score": 8.2,
+      "key_strengths": ["From comprehensive analysis", "Cross-validated by quarterly trends"],
+      "key_concerns": ["Identified in comprehensive analysis", "Supported by quarterly data"]
+    },
+    "income_analysis": {
+      "revenue_quality": 9.0,
+      "margin_trends": "EXPANDING|STABLE|CONTRACTING",
+      "earnings_sustainability": 8.5,
+      "key_metrics": "Comprehensive revenue analysis with quarterly trend validation"
+    },
+    "balance_sheet_analysis": {
+      "asset_quality": 8.0,
+      "capital_structure": "CONSERVATIVE|MODERATE|AGGRESSIVE",
+      "liquidity_position": 8.5,
+      "key_metrics": "Comprehensive balance sheet evaluation with trend confirmation"
+    },
+    "cash_flow_analysis": {
+      "operating_cf_quality": 8.5,
+      "fcf_generation": 8.0,
+      "capital_allocation": "EXCELLENT|GOOD|POOR",
+      "key_metrics": "Comprehensive cash flow assessment with quarterly patterns"
+    }
+  },
+  "technical_assessment": {
+    "trend_analysis": {
+      "primary_trend": "BULLISH|BEARISH|NEUTRAL",
+      "trend_strength": "STRONG|MODERATE|WEAK",
+      "momentum_signals": "Technical confirmation of fundamental strength from comprehensive analysis"
+    },
+    "entry_timing": {
+      "optimal_entry_zone": {"lower_bound": 0.0, "upper_bound": 0.0},
+      "timing_confidence": "HIGH|MEDIUM|LOW"
+    }
+  },
+  "risk_analysis": {
+    "overall_risk_score": 6.5,
+    "key_risks": ["From comprehensive analysis", "Validated by technical indicators", "Cross-referenced with quarterly trends"],
+    "risk_mitigation": "Comprehensive risk assessment with multi-timeframe validation"
+  },
+  "key_catalysts": [
+    {"catalyst": "From comprehensive analysis", "timeframe": "Q1 2025", "probability": "HIGH|MEDIUM|LOW"},
+    {"catalyst": "Quarterly trend-supported catalyst", "timeframe": "H2 2025", "probability": "HIGH|MEDIUM|LOW"},
+    {"catalyst": "Long-term strategic opportunity", "timeframe": "2026+", "probability": "HIGH|MEDIUM|LOW"}
+  ],
+  "executive_summary": {
+    "investment_thesis": "Comprehensive analysis-driven investment thesis supported by {{ quarterly_count }}-quarter trend validation and technical confirmation for institutional portfolio allocation.",
+    "key_conviction": "Primary conviction based on comprehensive fundamental strength with quarterly trend and technical validation"
+  },
+  "data_sources": {
+    "comprehensive_analysis": {% if comprehensive_analysis %}true{% else %}false{% endif %},
+    "quarterly_analyses_count": {{ quarterly_count }},
+    "technical_analysis": {% if technical_analysis %}true{% else %}false{% endif %}
+  }
+}
+
+**SCORING GUIDELINES:**
+- Overall Score: 1-10 (10=Strong Buy, 1=Strong Sell)
+- Comprehensive Analysis Weight: 70% (primary source)
+- Technical Analysis Weight: 30% (timing and confirmation)
+- Use comprehensive analysis as the foundation, quarterly analyses for trend validation
+- Higher confidence levels due to comprehensive analysis depth
+
+**ANALYSIS QUALITY INDICATORS:**
+- Comprehensive Analysis: {% if comprehensive_analysis %}✅ Available (PRIMARY){% else %}❌ Missing (DEGRADED MODE){% endif %}
+- Quarterly Trends: {% if quarterly_analyses %}✅ {{ quarterly_count }} quarters (SUPPORTING){% else %}❌ Missing{% endif %}  
+- Technical Signals: {% if technical_analysis %}✅ Available (CONFIRMATION){% else %}❌ Missing{% endif %}
+
+**PROVIDE SPECIFIC NUMERIC SCORES FOR ALL THREE FINANCIAL STATEMENT CATEGORIES BASED PRIMARILY ON COMPREHENSIVE ANALYSIS.**

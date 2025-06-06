@@ -1,0 +1,138 @@
+@startuml model-intelligence-system
+!theme carbon-gray
+title Model Intelligence & Memory Management System
+
+package "Model Intelligence Layer" {
+  class ModelCapabilityDetector {
+    +get_model_capabilities(model: str)
+    +parse_modelfile_context(modelfile: str)
+    +extract_parameter_size(model_info: dict)
+    +cache_capabilities(model: str, caps: dict)
+    --
+    -capabilities_cache: dict
+    -ollama_client: OllamaAPIClient
+  }
+  
+  class MemoryEstimator {
+    +estimate_requirements(param_size: str)
+    +check_system_memory()
+    +calculate_utilization(requirements: dict)
+    +validate_memory_sufficient(total_gb: float)
+    --
+    -system_memory_gb: float
+    -buffer_percentage: float = 0.2
+  }
+  
+  class ContextValidator {
+    +calculate_prompt_tokens(prompt: str)
+    +validate_context_fit(total_tokens: int, context_size: int)
+    +adjust_output_tokens(available: int, requested: int)
+    +generate_context_warnings(oversize: bool)
+    --
+    -chars_per_token: int = 4
+    -context_buffer: int = 100
+  }
+}
+
+package "Execution Layer" {
+  class LLMExecutionHandler {
+    +handle(request: LLMRequest)
+    +calculate_dynamic_context_size(request)
+    +execute_with_validation(request)
+    --
+    -model_capabilities_cache: dict
+    -api_client: OllamaAPIClient
+  }
+  
+  class MetalFrameworkInterface {
+    +initialize_gpu_context()
+    +execute_inference(model, prompt)
+    +monitor_gpu_utilization()
+    +cleanup_gpu_memory()
+    --
+    -gpu_memory_pool: dict
+    -performance_metrics: dict
+  }
+}
+
+package "Apple Silicon Hardware" {
+  class AppleSiliconChip {
+    +cpu_cores: List[CPUCore]
+    +gpu_cores: List[GPUCore] 
+    +neural_engine: NeuralEngine
+    +unified_memory: UnifiedMemory
+    --
+    +get_available_memory(): float
+    +get_gpu_utilization(): float
+    +get_thermal_state(): str
+  }
+  
+  class UnifiedMemory {
+    +total_capacity_gb: float
+    +available_gb: float
+    +wired_memory_gb: float
+    +compressed_memory_gb: float
+    --
+    +allocate_for_model(size_gb: float): bool
+    +get_memory_pressure(): float
+  }
+}
+
+package "Model Storage" {
+  class ModelMetadata {
+    +model_name: str
+    +context_size: int
+    +parameter_size: str
+    +memory_requirements: dict
+    +quantization: str
+    --
+    +is_memory_sufficient(): bool
+    +get_estimated_load_time(): int
+  }
+  
+  class ModelRepository {
+    +available_models: List[ModelMetadata]
+    +loaded_models: dict
+    --
+    +load_model(name: str): bool
+    +unload_model(name: str): bool
+    +get_model_info(name: str): ModelMetadata
+  }
+}
+
+' Relationships
+ModelCapabilityDetector --> MemoryEstimator : "provides param size"
+ModelCapabilityDetector --> ContextValidator : "provides context size"
+ContextValidator --> LLMExecutionHandler : "validation results"
+LLMExecutionHandler --> MetalFrameworkInterface : "execute request"
+MetalFrameworkInterface --> AppleSiliconChip : "hardware access"
+AppleSiliconChip --> UnifiedMemory : "memory management"
+MemoryEstimator --> UnifiedMemory : "check availability"
+ModelRepository --> ModelMetadata : "manages models"
+ModelCapabilityDetector --> ModelRepository : "queries model info"
+
+note top of ModelCapabilityDetector
+  **Key Features:**
+  • Auto-detects 4K-128K+ context windows
+  • Parses modelfile PARAMETER entries
+  • Caches capabilities for performance
+  • Validates model availability
+end note
+
+note top of MemoryEstimator
+  **Intelligence:**
+  • Q4_K: ~0.5GB per billion params
+  • KV Cache: ~2GB overhead
+  • System buffer: 20% of total RAM
+  • Real-time system memory check
+end note
+
+note top of MetalFrameworkInterface
+  **Apple Silicon Optimization:**
+  • GPU acceleration via Metal
+  • 95%+ CPU idle during inference
+  • Unified memory sharing
+  • Neural Engine utilization
+end note
+
+@enduml

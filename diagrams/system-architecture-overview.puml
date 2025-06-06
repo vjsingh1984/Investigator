@@ -1,0 +1,154 @@
+@startuml system-architecture-overview
+!theme aws-orange
+
+title InvestiGator - System Architecture Overview\n(Privacy-First AI Investment Research Platform)
+
+package "User Interface" {
+  [investigator.sh] as shell
+  note right of shell
+    **Main Entry Point**
+    • Bash orchestrator
+    • System health checks
+    • Batch processing
+    • Error handling
+  end note
+}
+
+package "Analysis Pipeline" {
+  [SEC Fundamental Analysis] as sec_analysis
+  [Technical Analysis] as tech_analysis
+  [Investment Synthesis] as synthesis
+  [Report Generation] as reports
+  
+  shell --> sec_analysis : Step 1/3
+  sec_analysis --> tech_analysis : Step 2/3
+  tech_analysis --> synthesis : Step 3/3
+  synthesis --> reports : PDF Generation
+}
+
+package "Peer Group System" {
+  [Peer Group Analyzer] as peer_analyzer
+  [Russell 1000 Classifications] as russell
+  [Comparative Analysis] as comp_analysis
+  [Peer Reports] as peer_reports
+  
+  shell --> peer_analyzer : Batch Analysis
+  peer_analyzer --> russell : Industry Mapping
+  russell --> comp_analysis : Relative Metrics
+  comp_analysis --> peer_reports : PDF Reports
+}
+
+package "Cache Architecture (Refactored)" {
+  [Cache Manager] as cache_mgr
+  [File Cache Handler] as file_cache
+  [Parquet Cache Handler] as parquet_cache
+  [RDBMS Cache Handler] as db_cache
+  
+  note bottom of cache_mgr
+    **Direct Operations**
+    ✅ cache_manager.get(CacheType, key)
+    ✅ cache_manager.set(CacheType, key, value)
+    ✅ cache_manager.exists(CacheType, key)
+    🗑️ No wrapper methods (facade removed)
+  end note
+}
+
+package "AI Processing (Local)" {
+  [Ollama LLM Server] as ollama
+  [LLM Facade] as llm_facade
+  [Model Selection] as models
+  
+  ollama --> models : phi4, qwen2.5, llama3.3
+  models --> llm_facade : Strategy Pattern
+}
+
+package "Data Sources" {
+  [SEC EDGAR API] as sec_api
+  [Yahoo Finance API] as yahoo_api
+  [CIK Mapper] as cik_mapper
+  
+  note bottom of sec_api
+    **Free APIs Only**
+    • No API keys required
+    • Rate-limited requests
+    • SEC compliance headers
+  end note
+}
+
+package "Storage Layer" {
+  database "PostgreSQL\nLocal Database" as postgres
+  folder "Compressed Cache\ngzip Level 9" as file_storage
+  folder "Parquet Files\nColumnar Data" as parquet_storage
+  
+  note bottom of postgres
+    **Local Storage Only**
+    • No cloud dependencies
+    • Encrypted connections
+    • Connection pooling
+    • JSONB compression
+  end note
+}
+
+package "Output Products" {
+  [PDF Reports] as pdf_reports
+  [Email Delivery] as email
+  [Charts & Visualizations] as charts
+  
+  note bottom of pdf_reports
+    **Professional Reports**
+    • Executive summaries
+    • Investment scores (0-10)
+    • Technical charts
+    • Peer comparisons
+    • Risk assessments
+  end note
+}
+
+' Main data flows
+sec_analysis --> cache_mgr : Direct cache calls
+tech_analysis --> cache_mgr : Direct cache calls
+synthesis --> cache_mgr : Direct cache calls
+peer_analyzer --> cache_mgr : Direct cache calls
+
+cache_mgr --> file_cache : Priority-based
+cache_mgr --> parquet_cache : Technical data
+cache_mgr --> db_cache : All types
+
+file_cache --> file_storage
+parquet_cache --> parquet_storage
+db_cache --> postgres
+
+' AI processing flows
+sec_analysis --> llm_facade : Fundamental prompts
+tech_analysis --> llm_facade : Technical prompts
+synthesis --> llm_facade : Synthesis prompts
+llm_facade --> ollama : Local processing
+
+' Data source flows
+sec_analysis --> sec_api : Company filings
+sec_analysis --> cik_mapper : Ticker resolution
+tech_analysis --> yahoo_api : Market data
+
+' Output flows
+reports --> pdf_reports
+reports --> email : Optional delivery
+reports --> charts : Technical visualizations
+
+' Privacy and security annotations
+note top of ollama
+🔒 **Privacy-First Design**
+• 100% local processing
+• No cloud dependencies
+• Your data never leaves MacBook
+• Apple Silicon optimized
+end note
+
+note bottom of email
+📧 **Optional Features**
+• SMTP/TLS encryption
+• Gmail app passwords
+• Portfolio summaries
+• Weekly reports
+end note
+
+@enduml

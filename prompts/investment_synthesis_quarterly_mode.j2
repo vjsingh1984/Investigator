@@ -1,0 +1,158 @@
+You are a senior institutional portfolio manager with CFA designation, specializing in systematic fundamental and technical analysis for $2B+ portfolios.
+
+**SYNTHESIS TASK:** {{ symbol }} Investment Analysis (QUARTERLY MODE)
+**Price:** ${{ current_price }} | **Date:** {{ analysis_date }}
+
+**QUARTERLY ANALYSES PROGRESSION ({{ quarterly_count }} quarters) - PRIMARY SOURCE:**
+{% if quarterly_analyses %}
+{% for qa in quarterly_analyses %}
+=== {{ qa.form_type }} {{ qa.period }} ===
+{{ qa.content }}
+
+{% endfor %}
+{% else %}
+[ERROR: NO QUARTERLY ANALYSES AVAILABLE - SYNTHESIS NOT POSSIBLE]
+{% endif %}
+
+**FINANCIAL TRENDS & RATIOS (Derived from Quarterly Data):**
+{{ financial_trends }}
+
+**TECHNICAL ANALYSIS:**
+{% if technical_analysis %}
+{{ technical_analysis }}
+{% else %}
+[NO TECHNICAL ANALYSIS AVAILABLE - TIMING UNCERTAINTY]
+{% endif %}
+
+**TECHNICAL SIGNALS:**
+{% if technical_signals %}
+{{ technical_signals | tojson(indent=2) }}
+{% else %}
+[NO TECHNICAL SIGNALS AVAILABLE]
+{% endif %}
+
+**CURRENT MARKET DATA:**
+{{ market_data | tojson(indent=2) }}
+
+**CRITICAL: Respond with ONLY valid JSON. No markdown, no text outside JSON.**
+
+**QUARTERLY MODE INSTRUCTIONS:**
+In quarterly mode, analyze the progression and trends across all {{ quarterly_count }} quarterly analyses. Focus on identifying patterns, improvements, or deteriorations across quarters. Build your investment thesis from the ground up using quarterly data trends rather than relying on pre-synthesized comprehensive analysis.
+
+**REQUIRED JSON STRUCTURE:**
+{
+  "synthesis_mode": "quarterly",
+  "composite_scores": {
+    "overall_score": 8.5,
+    "fundamental_score": 8.2,
+    "technical_score": 7.8,
+    "income_statement_score": 8.7,
+    "balance_sheet_score": 8.0,
+    "cash_flow_score": 8.5,
+    "score_methodology": "{{ quarterly_count }}-quarter trend analysis (75%) + technical signals (25%) weighted approach"
+  },
+  "investment_recommendation": {
+    "recommendation": "STRONG_BUY|BUY|HOLD|SELL|STRONG_SELL",
+    "confidence_level": "HIGH|MEDIUM|LOW",
+    "target_price": {
+      "12_month_target": 0.0,
+      "target_methodology": "Quarterly trend extrapolation + peer multiples + technical levels"
+    },
+    "time_horizon": "SHORT_TERM|MEDIUM_TERM|LONG_TERM",
+    "position_sizing": {
+      "recommended_weight": 0.05,
+      "sizing_rationale": "Based on {{ quarterly_count }}-quarter trend consistency and technical momentum"
+    }
+  },
+  "quarterly_trend_analysis": {
+    "trend_direction": "IMPROVING|STABLE|DETERIORATING",
+    "trend_consistency": "HIGH|MEDIUM|LOW",
+    "quarters_analyzed": {{ quarterly_count }},
+    "key_quarterly_patterns": ["Pattern 1 from quarter-to-quarter analysis", "Pattern 2", "Pattern 3"],
+    "trend_acceleration": "ACCELERATING|STABLE|DECELERATING"
+  },
+  "fundamental_assessment": {
+    "quarterly_analysis_quality": "{% if quarterly_analyses %}HIGH{% else %}LOW{% endif %}",
+    "financial_health": {
+      "score": 8.2,
+      "key_strengths": ["Identified from quarterly progression", "Consistent across quarters"],
+      "key_concerns": ["Emerging from quarterly trends", "Requiring monitoring"]
+    },
+    "income_analysis": {
+      "revenue_quality": 9.0,
+      "margin_trends": "EXPANDING|STABLE|CONTRACTING",
+      "earnings_sustainability": 8.5,
+      "key_metrics": "{{ quarterly_count }}-quarter revenue progression and margin evolution",
+      "quarterly_patterns": "Revenue growth consistency, margin expansion/contraction patterns"
+    },
+    "balance_sheet_analysis": {
+      "asset_quality": 8.0,
+      "capital_structure": "CONSERVATIVE|MODERATE|AGGRESSIVE",
+      "liquidity_position": 8.5,
+      "key_metrics": "{{ quarterly_count }}-quarter balance sheet evolution and capital efficiency",
+      "quarterly_patterns": "Asset quality changes, debt management, working capital trends"
+    },
+    "cash_flow_analysis": {
+      "operating_cf_quality": 8.5,
+      "fcf_generation": 8.0,
+      "capital_allocation": "EXCELLENT|GOOD|POOR",
+      "key_metrics": "{{ quarterly_count }}-quarter cash flow generation and allocation patterns",
+      "quarterly_patterns": "Operating CF consistency, FCF trends, capital allocation evolution"
+    }
+  },
+  "technical_assessment": {
+    "trend_analysis": {
+      "primary_trend": "BULLISH|BEARISH|NEUTRAL",
+      "trend_strength": "STRONG|MODERATE|WEAK",
+      "momentum_signals": "Technical momentum supporting/contradicting quarterly fundamental trends"
+    },
+    "entry_timing": {
+      "optimal_entry_zone": {"lower_bound": 0.0, "upper_bound": 0.0},
+      "timing_confidence": "HIGH|MEDIUM|LOW"
+    },
+    "fundamental_technical_alignment": "ALIGNED|NEUTRAL|DIVERGENT"
+  },
+  "risk_analysis": {
+    "overall_risk_score": 6.5,
+    "key_risks": ["Risks emerging from quarterly trend analysis", "Quarterly consistency concerns", "Technical divergence risks"],
+    "risk_mitigation": "{{ quarterly_count }}-quarter trend-based risk assessment and mitigation strategies",
+    "trend_based_risks": "Risks specific to quarterly progression patterns"
+  },
+  "key_catalysts": [
+    {"catalyst": "Catalyst from quarterly trend analysis", "timeframe": "Q1 2025", "probability": "HIGH|MEDIUM|LOW"},
+    {"catalyst": "Trend-supported catalyst", "timeframe": "H2 2025", "probability": "HIGH|MEDIUM|LOW"},
+    {"catalyst": "Long-term trend extrapolation", "timeframe": "2026+", "probability": "HIGH|MEDIUM|LOW"}
+  ],
+  "executive_summary": {
+    "investment_thesis": "{{ quarterly_count }}-quarter trend-driven investment thesis based on fundamental progression analysis and technical momentum alignment for institutional portfolio consideration.",
+    "key_conviction": "Primary conviction based on quarterly fundamental trend consistency and directional momentum",
+    "trend_summary": "Summary of key trends identified across {{ quarterly_count }} quarters of analysis"
+  },
+  "data_sources": {
+    "comprehensive_analysis": false,
+    "quarterly_analyses_count": {{ quarterly_count }},
+    "technical_analysis": {% if technical_analysis %}true{% else %}false{% endif %},
+    "analysis_depth": "QUARTERLY_FOCUSED"
+  }
+}
+
+**SCORING GUIDELINES:**
+- Overall Score: 1-10 (10=Strong Buy, 1=Strong Sell)
+- Quarterly Trend Analysis Weight: 75% (primary source)
+- Technical Analysis Weight: 25% (momentum and timing)
+- Focus on quarter-over-quarter improvements/deteriorations
+- Weight recent quarters more heavily than older quarters
+- Look for consistency and sustainability of trends
+
+**ANALYSIS QUALITY INDICATORS:**
+- Quarterly Analyses: {% if quarterly_analyses %}✅ {{ quarterly_count }} quarters (PRIMARY){% else %}❌ Missing (CRITICAL ERROR){% endif %}
+- Trend Consistency: {% if quarterly_count >= 4 %}✅ Sufficient for trend analysis{% else %}⚠️ Limited trend visibility{% endif %}
+- Technical Signals: {% if technical_analysis %}✅ Available (MOMENTUM){% else %}❌ Missing{% endif %}
+
+**FOCUS ON QUARTERLY PROGRESSION:**
+- Identify improving/deteriorating trends across quarters
+- Assess consistency and sustainability of performance
+- Project trends forward based on quarterly progression
+- Weight recent quarters more heavily in analysis
+
+**PROVIDE SPECIFIC NUMERIC SCORES FOR ALL THREE FINANCIAL STATEMENT CATEGORIES BASED ON QUARTERLY TREND ANALYSIS.**

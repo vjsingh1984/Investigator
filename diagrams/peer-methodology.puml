@@ -1,0 +1,227 @@
+@startuml peer-methodology
+!theme plain
+title Peer Group Analysis Methodology
+
+!define RECTANGLE class
+
+package "Russell 1000 Classification System" {
+  RECTANGLE "🏭 Sector Classification" as SECTOR {
+    Technology
+    Financials
+    Healthcare
+    Consumer Discretionary
+    Consumer Staples
+    Industrials
+    Energy
+    Materials
+    Real Estate
+    Communication Services
+    Utilities
+  }
+  
+  RECTANGLE "🏢 Industry Classification" as INDUSTRY {
+    Software Infrastructure
+    Banks Money Center
+    Pharmaceuticals
+    E-commerce
+    Food & Beverages
+    Aerospace
+    Oil & Gas
+    Chemicals
+    REITs
+    Media
+    Electric Utilities
+    + 40+ more industries
+  }
+  
+  RECTANGLE "🏪 Market Cap Classification" as MCAP {
+    Large Cap: >$10B
+    Mid Cap: $2B-$10B
+    Small Cap: <$2B
+  }
+}
+
+package "Peer Group Selection Process" {
+  RECTANGLE "🎯 Symbol Input" as INPUT {
+    Target Symbol: AAPL
+    Optional Filters:
+    - Sector: technology
+    - Industry: software_infrastructure
+    - Market Cap: large_cap
+  }
+  
+  RECTANGLE "🔍 Peer Identification" as IDENTIFY {
+    1. Lookup symbol in Russell 1000
+    2. Identify sector & industry
+    3. Extract peer group members
+    4. Filter by market cap (optional)
+    5. Return peer symbol list
+  }
+  
+  RECTANGLE "📊 Peer Group Validation" as VALIDATE {
+    Minimum: 3 companies
+    Maximum: 15 companies
+    Exclude: Target symbol
+    Verify: Active trading status
+    Check: Data availability
+  }
+}
+
+package "Comprehensive Analysis Pipeline" {
+  RECTANGLE "📋 SEC Fundamental Analysis" as SEC_ANALYSIS {
+    For Each Peer Symbol:
+    1. Fetch SEC filings (10-K/10-Q)
+    2. Extract XBRL financial data
+    3. Calculate quarterly metrics
+    4. Generate AI fundamental analysis
+    5. Store results in cache
+  }
+  
+  RECTANGLE "📈 Technical Analysis" as TECH_ANALYSIS {
+    For Each Peer Symbol:
+    1. Fetch 365 days price data
+    2. Calculate 30+ indicators
+    3. Identify support/resistance
+    4. Generate AI technical insights
+    5. Store in Parquet cache
+  }
+  
+  RECTANGLE "🔗 Investment Synthesis" as SYNTHESIS {
+    For Each Peer Symbol:
+    1. Combine fundamental + technical
+    2. Calculate weighted scores
+    3. Generate investment recommendation
+    4. Store synthesis results
+    5. Extract key financial metrics
+  }
+}
+
+package "Peer Relative Analysis" {
+  RECTANGLE "🧮 Metric Calculation" as METRICS {
+    Financial Health Metrics:
+    - P/E Ratio
+    - P/B Ratio
+    - Debt/Equity Ratio
+    - Current Ratio
+    - ROE (Return on Equity)
+    - ROA (Return on Assets)
+    - Gross Margin
+    - Operating Margin
+    - Revenue Growth
+    - EPS Growth
+  }
+  
+  RECTANGLE "📊 Peer Averages" as AVERAGES {
+    Calculate Group Statistics:
+    - Mean values
+    - Median values
+    - Standard deviation
+    - Min/Max ranges
+    - Percentile rankings
+    - Outlier detection
+  }
+  
+  RECTANGLE "💰 Relative Positioning" as POSITIONING {
+    For Target Symbol:
+    - % above/below peer average
+    - Percentile ranking (0-100)
+    - Standard deviations from mean
+    - Discount/Premium classification
+    - Strength/Weakness identification
+  }
+}
+
+package "Valuation Adjustments" {
+  RECTANGLE "🎯 Price Target Adjustment" as PRICE_ADJ {
+    Base Price Target: $420.00
+    Peer P/E Premium: +15%
+    Quality Premium: +5%
+    Growth Premium: +8%
+    ----------------
+    Adjusted Target: $435.50
+    Adjustment: +3.7%
+  }
+  
+  RECTANGLE "📈 Growth Projections" as GROWTH_PROJ {
+    Revenue Growth vs Peers:
+    - Historical comparison
+    - Forward guidance analysis
+    - Market share trends
+    - Competitive positioning
+    - Risk-adjusted projections
+  }
+  
+  RECTANGLE "⚖️ Risk Assessment" as RISK_ASSESS {
+    Relative Risk Factors:
+    - Beta vs peer group
+    - Volatility comparison
+    - Debt levels vs peers
+    - Business model risks
+    - Regulatory exposure
+  }
+}
+
+package "Report Generation" {
+  RECTANGLE "📄 Executive Summary" as EXEC_SUMMARY {
+    - Peer group overview
+    - Key insights & recommendations
+    - Relative positioning summary
+    - Investment thesis
+    - Risk factors
+  }
+  
+  RECTANGLE "📊 Visual Analysis" as VISUAL {
+    3D Positioning Chart:
+    - X: Financial Health Score
+    - Y: Growth Prospects Score
+    - Z: Valuation Score
+    - Color: Technical Score
+    
+    2D Scatter Plot:
+    - X: Technical Score
+    - Y: Fundamental Score
+    - Quadrant analysis
+  }
+  
+  RECTANGLE "📋 Comparative Tables" as TABLES {
+    Peer Comparison Table:
+    - All financial metrics
+    - Rankings and percentiles
+    - Discount/premium indicators
+    - Investment scores
+    - Price targets
+  }
+}
+
+' Relationships
+SECTOR --> INDUSTRY
+INDUSTRY --> MCAP
+MCAP --> INPUT
+INPUT --> IDENTIFY
+IDENTIFY --> VALIDATE
+VALIDATE --> SEC_ANALYSIS
+SEC_ANALYSIS --> TECH_ANALYSIS
+TECH_ANALYSIS --> SYNTHESIS
+SYNTHESIS --> METRICS
+METRICS --> AVERAGES
+AVERAGES --> POSITIONING
+POSITIONING --> PRICE_ADJ
+POSITIONING --> GROWTH_PROJ
+POSITIONING --> RISK_ASSESS
+PRICE_ADJ --> EXEC_SUMMARY
+GROWTH_PROJ --> EXEC_SUMMARY
+RISK_ASSESS --> EXEC_SUMMARY
+EXEC_SUMMARY --> VISUAL
+VISUAL --> TABLES
+
+note right of IDENTIFY : Uses data/russell_1000_peer_groups.json\nfor sector/industry mappings
+
+note right of SEC_ANALYSIS : Runs same pipeline as individual\nanalysis but for entire peer group
+
+note right of METRICS : Extracted from cached synthesis\nresponses and financial data
+
+note right of PRICE_ADJ : Adjustments based on relative\npositioning vs peer averages
+
+note bottom of VISUAL : Charts show relative positioning\nwithin peer group context
+
+@enduml

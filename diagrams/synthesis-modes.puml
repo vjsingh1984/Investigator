@@ -1,0 +1,154 @@
+@startuml synthesis-modes
+!define RECTANGLE class
+
+title InvestiGator v2.2 - Synthesis Mode Architecture
+
+skinparam backgroundColor #f8f9fa
+skinparam classBorderColor #2c3e50
+skinparam classBackgroundColor #ecf0f1
+
+package "Synthesis Engine" {
+    RECTANGLE Synthesizer {
+        + synthesis_mode: str
+        + --synthesis-mode comprehensive
+        + --synthesis-mode quarterly
+        --
+        + generate_recommendation()
+        + _extract_sec_comprehensive_data()
+        + _extract_technical_indicators()
+        + _create_recommendation_from_llm_data()
+    }
+    
+    package "Templates" {
+        RECTANGLE ComprehensiveTemplate {
+            investment_synthesis_comprehensive.j2
+            --
+            📊 SEC Comprehensive Data
+            📈 Technical Indicators
+            🎯 Direct Extraction (60% faster)
+        }
+        
+        RECTANGLE QuarterlyTemplate {
+            investment_synthesis_quarterly_mode.j2
+            --
+            📋 Quarter-by-Quarter Analysis
+            📊 Trend Analysis
+            🔄 Progressive Processing (25% faster)
+        }
+        
+        RECTANGLE PeerTemplate {
+            investment_synthesis_peer.j2
+            --
+            🏢 Peer Group Comparisons
+            📊 Relative Valuations
+            🎯 Industry Positioning
+        }
+    }
+}
+
+package "Data Sources" {
+    RECTANGLE SECComprehensive {
+        SEC Comprehensive Analysis
+        --
+        📊 analysis_summary
+        💡 investment_thesis
+        📈 quarterly_analyses.detail
+        🎯 business_quality_score
+        💰 financial_health_score
+    }
+    
+    RECTANGLE TechnicalAnalysis {
+        Technical Analysis Cache
+        --
+        🧠 thinking (reasoning process)
+        📊 technical_score: 5.5
+        📈 momentum_signals[]
+        ⚠️ risk_factors[]
+        🎯 support/resistance levels
+    }
+}
+
+package "Output Generation" {
+    RECTANGLE PDFReportGenerator {
+        Enhanced PDF Reports
+        --
+        🧠 SEC Fundamental Thinking
+        🔧 Technical Analysis Thinking
+        🎯 Synthesis Analysis Reasoning
+        📊 Visual Scorecards
+        📈 Technical Summary Tables
+    }
+    
+    RECTANGLE ScoreComponents {
+        Score Extraction & Display
+        --
+        📊 Fundamental: 8.2/10
+        🔧 Technical: 5.5/10 (fixed!)
+        🎯 Overall: 7.1/10
+        --
+        ✅ growth_score (not growth_prospects)
+        ✅ fundamental_score (not financial_health)
+    }
+}
+
+package "Cache System" {
+    RECTANGLE LLMCache {
+        Multi-Level Cache
+        --
+        🗃️ File Cache (response_technical_indicators.txt)
+        💾 Database Cache (PostgreSQL)
+        🔄 Cache Key Differentiation
+        📝 llm_type: synthesis_comprehensive
+        📝 llm_type: synthesis_quarterly
+    }
+}
+
+' Relationships
+Synthesizer --> ComprehensiveTemplate : comprehensive mode
+Synthesizer --> QuarterlyTemplate : quarterly mode
+Synthesizer --> PeerTemplate : peer analysis
+
+Synthesizer --> SECComprehensive : extract data
+Synthesizer --> TechnicalAnalysis : extract indicators
+
+ComprehensiveTemplate --> SECComprehensive : direct extraction
+ComprehensiveTemplate --> TechnicalAnalysis : cached responses
+
+Synthesizer --> PDFReportGenerator : generate report
+PDFReportGenerator --> ScoreComponents : display scores
+
+PDFReportGenerator --> LLMCache : thinking extraction
+LLMCache --> SECComprehensive : comprehensive data
+LLMCache --> TechnicalAnalysis : file fallback
+
+note right of ComprehensiveTemplate
+  **60% Faster Processing**
+  - Extracts from cached LLM responses
+  - Avoids re-processing raw data
+  - Uses structured JSON outputs
+end note
+
+note right of QuarterlyTemplate
+  **25% Faster Processing**
+  - Quarter-by-quarter analysis
+  - Trend-based insights
+  - Progressive data building
+end note
+
+note right of TechnicalAnalysis
+  **Fixed Technical Score**
+  - Handles file headers correctly
+  - Extracts technical_score: 5.5
+  - Parses momentum_signals
+  - File fallback in PDF generator
+end note
+
+note right of PDFReportGenerator
+  **Enhanced Thinking Sections**
+  - SEC: analysis_summary + investment_thesis
+  - Technical: thinking + signals + risks
+  - Synthesis: methodology + reasoning
+  - Visual components & scorecards
+end note
+
+@enduml

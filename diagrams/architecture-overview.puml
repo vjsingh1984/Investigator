@@ -1,0 +1,107 @@
+@startuml architecture-overview
+!theme plain
+title InvestiGator System Architecture Overview
+
+package "Entry Point" {
+  [🐢 investigator.sh] as SHELL
+  [⚙️ config.json] as CONFIG
+}
+
+package "Core Analysis Modules" {
+  [📊 sec_fundamental.py] as FUND
+  [📈 yahoo_technical.py] as TECH  
+  [🔗 synthesizer.py] as SYNTH
+}
+
+package "Peer Group Analysis" {
+  [🏢 run_peer_groups_comprehensive.py] as PEER_COMP
+  [⚡ run_peer_groups_fast.py] as PEER_FAST
+  [📄 peer_group_report_generator.py] as PEER_REPORT
+}
+
+package "Pattern Architecture" {
+  [🏛️ SEC Facade] as SEC_FACADE
+  [🤖 LLM Facade] as LLM_FACADE
+  [📐 Analysis Strategies] as STRATEGIES
+}
+
+package "Data Sources" {
+  cloud "🏛️ SEC EDGAR\nFree APIs" as SEC_API
+  cloud "📈 Yahoo Finance\nyfinance library" as YAHOO_API
+  [🏷️ Russell 1000\nPeer Groups] as PEER_DATA
+}
+
+package "Cache System" {
+  [🎯 CacheManager] as CACHE_MGR
+  database "💾 Disk Cache\nJSON + gzip" as DISK
+  database "🗄️ DB Cache\nPostgreSQL JSONB" as DB_CACHE
+}
+
+package "AI Processing" {
+  [🦙 Ollama\nLocal LLM Server] as OLLAMA
+  [📝 llama3.1:8b\nAll Analysis Types] as LLAMA31
+}
+
+package "Data Layer" {
+  database "🗄️ PostgreSQL\ninvestment_ai DB" as DB
+  [📦 DAOs\nData Access Objects] as DAOS
+}
+
+package "Outputs" {
+  [📄 PDF Reports\nReportLab + Charts] as PDF
+  [📧 Email\nSMTP/TLS Optional] as EMAIL
+  [📋 Logs\nSymbol-specific] as LOGS
+}
+
+' Main Flow
+SHELL --> CONFIG
+SHELL --> FUND
+SHELL --> TECH  
+SHELL --> SYNTH
+SHELL --> PEER_COMP
+SHELL --> PEER_FAST
+
+' Pattern connections
+FUND --> SEC_FACADE
+SEC_FACADE --> LLM_FACADE
+SEC_FACADE --> STRATEGIES
+
+' Peer group connections
+PEER_COMP --> FUND
+PEER_COMP --> TECH
+PEER_COMP --> SYNTH
+PEER_FAST --> SYNTH
+PEER_COMP --> PEER_REPORT
+PEER_FAST --> PEER_REPORT
+PEER_REPORT --> PEER_DATA
+
+' Data source connections
+SEC_FACADE --> SEC_API
+TECH --> YAHOO_API
+
+' Cache flow
+SEC_API --> CACHE_MGR
+YAHOO_API --> CACHE_MGR
+CACHE_MGR --> DISK
+CACHE_MGR --> DB_CACHE
+
+' AI connections
+LLM_FACADE --> OLLAMA
+OLLAMA --> LLAMA31
+TECH --> OLLAMA
+SYNTH --> OLLAMA
+
+' Database connections
+DB_CACHE --> DB
+DAOS --> DB
+FUND --> DAOS
+TECH --> DAOS
+SYNTH --> DAOS
+
+' Output connections
+SYNTH --> PDF
+PEER_REPORT --> PDF
+SYNTH --> EMAIL
+SHELL --> LOGS
+
+@enduml

@@ -1,0 +1,176 @@
+// InvestiGator - AI Investment Research Assistant
+// Copyright (c) 2025 Vijaykumar Singh
+// Licensed under the Apache License, Version 2.0
+// See LICENSE file for details
+
+= 📊 Appendix: FAANG Portfolio Analysis Example
+Vijaykumar Singh <https://github.com/vjsingh1984>
+v1.0, 2025-06-06
+:doctype: book
+:toc: left
+:toclevels: 2
+:sectanchors:
+:sectlinks:
+:sectnums:
+:source-highlighter: highlight.js
+:icons: font
+:imagesdir: ../images
+:reproducible:
+
+[.lead]
+*Real-world demonstration of InvestiGator's comprehensive AI-powered investment analysis capabilities*
+
+[source,text]
+----
+╔══════════════════════════════════════════════════════════════════════════════════╗
+║                                                                                  ║
+║    📊  𝗙𝗔𝗔𝗡𝗚 𝗣𝗼𝗿𝘁𝗳𝗼𝗹𝗶𝗼 𝗔𝗻𝗮𝗹𝘆𝘀𝗶𝘀 𝗘𝘅𝗮𝗺𝗽𝗹𝗲  📈                               ║
+║                                                                                  ║
+║             ┌─────────────────────────────────────────────────────┐              ║
+║             │  🍎 Apple • 📘 Meta • 📦 Amazon • 🎬 Netflix      │              ║
+║             │       • 🔍 Google • Complete AI Analysis           │              ║
+║             └─────────────────────────────────────────────────────┘              ║
+║                                                                                  ║
+║                    Comprehensive Multi-Company Report                           ║
+╚══════════════════════════════════════════════════════════════════════════════════╝
+----
+
+== 🌟 Overview
+
+This appendix showcases a real-world example of InvestiGator's powerful multi-company analysis capabilities through a comprehensive FAANG portfolio analysis. The featured report demonstrates the system's ability to process multiple high-profile technology companies simultaneously, providing professional-grade investment insights.
+
+TIP: This example report was generated using InvestiGator's batch processing mode, analyzing all five FAANG companies in a single comprehensive session.
+
+== 📋 Report Details
+
+[cols="1,3"]
+|===
+|Report File |link:../examples/faang_portfolio_analysis.pdf[faang_portfolio_analysis.pdf]
+|Companies Analyzed |Apple (AAPL), Meta (META), Amazon (AMZN), Netflix (NFLX), Google (GOOGL)
+|Analysis Type |Comprehensive Batch Analysis
+|Generation Date |2025-06-06
+|Total Pages |~150+ pages of detailed analysis
+|Processing Time |~20-30 minutes on Apple Silicon MacBook
+|===
+
+== 🎯 What's Included
+
+The FAANG portfolio analysis report showcases InvestiGator's full analytical capabilities:
+
+=== 📊 Individual Company Analysis
+* **SEC Filing Analysis**: Deep dive into 10-K and 10-Q filings for each company
+* **Technical Analysis**: 30+ technical indicators including RSI, MACD, Bollinger Bands
+* **AI-Powered Synthesis**: Weighted fundamental (60%) and technical (40%) recommendations
+* **Investment Scoring**: 0-10 scale scoring with clear buy/hold/sell recommendations
+
+=== 🏢 Comparative Insights
+* **Cross-Company Comparisons**: Revenue growth, profit margins, valuation metrics
+* **Technology Sector Positioning**: Peer group analysis within the software & technology space
+* **Market Leadership Analysis**: Competitive advantages and market share dynamics
+* **Risk Assessment**: Company-specific and sector-wide risk evaluation
+
+=== 📈 Visual Analytics
+* **Technical Charts**: Price action analysis with trend indicators
+* **Fundamental Metrics**: Financial ratio comparisons and growth trajectories
+* **Investment Scorecards**: Visual representation of AI-generated scores
+* **Portfolio Positioning**: Relative strength and correlation analysis
+
+== 🚀 How This Report Was Generated
+
+The FAANG analysis demonstrates InvestiGator's batch processing capabilities:
+
+[source,bash]
+----
+# Generate comprehensive FAANG analysis
+./investigator.sh --symbols AAPL META AMZN NFLX GOOGL
+
+# Alternative method using batch report generation
+python synthesizer.py --symbols AAPL META AMZN NFLX GOOGL --report
+----
+
+== 💡 Key Insights from the Analysis
+
+The FAANG portfolio analysis reveals several notable insights that demonstrate InvestiGator's analytical depth:
+
+=== 🎯 Investment Recommendations
+* **Clear Scoring System**: Each company receives detailed 0-10 investment scores
+* **Risk-Adjusted Returns**: Analysis considers both growth potential and downside risks
+* **Sector Dynamics**: Understanding of competitive positioning within technology
+* **Timing Considerations**: Technical analysis provides entry/exit point guidance
+
+=== 📊 Analytical Depth
+* **SEC Data Integration**: Real financial data from official SEC filings
+* **Technical Precision**: Professional-grade technical analysis with multiple timeframes
+* **AI Synthesis**: Local LLM processing provides nuanced investment reasoning
+* **Comprehensive Coverage**: All aspects of investment analysis in a single report
+
+== 🔗 Running Your Own Analysis
+
+To generate similar multi-company analyses using InvestiGator:
+
+=== Single Company Analysis
+[source,bash]
+----
+# Analyze individual companies
+./investigator.sh --symbol AAPL
+./investigator.sh --symbol MSFT --synthesis-mode comprehensive
+----
+
+=== Batch Portfolio Analysis
+[source,bash]
+----
+# Analyze multiple companies simultaneously
+./investigator.sh --symbols AAPL MSFT GOOGL TSLA NVDA
+
+# Generate comprehensive peer group analysis
+./investigator.sh --peer-groups-analysis --peer-sector technology
+----
+
+=== Weekly Portfolio Reports
+[source,bash]
+----
+# Setup automated weekly analysis
+./investigator.sh --weekly-report --send-email
+
+# Configure your portfolio in config.json
+"stocks_to_track": ["AAPL", "META", "AMZN", "NFLX", "GOOGL"]
+----
+
+== 🔄 Return to Main Documentation
+
+This appendix provides a real-world example of InvestiGator's capabilities. For complete setup instructions, configuration options, and advanced usage, please refer to the main documentation:
+
+[NOTE]
+====
+📖 **Main Documentation**: link:../README.adoc[README.adoc] +
+🏗️ **System Architecture**: link:architecture.adoc[architecture.adoc] +
+🔄 **Cache Management**: link:cache-management.adoc[cache-management.adoc] +
+🏢 **Peer Group Analysis**: link:peer-groups.adoc[peer-groups.adoc] +
+📱 **Synthesis Modes**: link:synthesis-modes.adoc[synthesis-modes.adoc]
+====
+
+== 📞 Support and Questions
+
+For questions about replicating this analysis or setting up InvestiGator for your own portfolio:
+
+* **GitHub Issues**: https://github.com/vjsingh1984/InvestiGator/issues
+* **Main Documentation**: link:../README.adoc[README.adoc] - Complete setup and usage guide
+* **Configuration Help**: link:../README.adoc#configuration[Configuration Section] - Setting up your environment
+
+[source,text]
+----
+╔══════════════════════════════════════════════════════════════════════════════════╗
+║                                                                                  ║
+║                   🎉  Ready to Analyze Your Portfolio?  🎉                      ║
+║                                                                                  ║
+║              ┌─────────────────────────────────────────────────┐                ║
+║              │  1. Follow the main README.adoc setup guide    │                ║
+║              │  2. Configure your portfolio in config.json    │                ║
+║              │  3. Run: ./investigator.sh --weekly-report     │                ║
+║              │  4. Get professional AI-powered insights!      │                ║
+║              └─────────────────────────────────────────────────┘                ║
+║                                                                                  ║
+║                        🐊  InvestiGator - Built for Investors  🐊              ║
+║                                                                                  ║
+╚══════════════════════════════════════════════════════════════════════════════════╝
+----

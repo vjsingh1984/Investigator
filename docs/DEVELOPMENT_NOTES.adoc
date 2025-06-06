@@ -1,0 +1,274 @@
+// InvestiGator Development Notes
+// This file contains important technical notes, known issues, and architectural decisions
+// Preserved from markdown documentation during consolidation
+
+= InvestiGator Development Notes
+:toc: left
+:toclevels: 2
+
+== v2.2 Synthesis Mode Enhancements (2025-06-06)
+
+=== 🎯 Synthesis Mode Switching
+* **Comprehensive Mode**: 60% faster processing by extracting data directly from cached SEC comprehensive and technical LLM responses
+* **Quarterly Mode**: 25% faster processing using quarter-by-quarter trend analysis
+* **Separate Jinja2 Templates**: Mode-specific prompts for `investment_synthesis_comprehensive.j2`, `investment_synthesis_quarterly_mode.j2`, `investment_synthesis_peer.j2`
+* **Cache Key Differentiation**: Uses `llm_type` with descriptive values (`synthesis_comprehensive`, `synthesis_quarterly`) to prevent cache collisions
+
+=== 🤖 LLM Thinking Extraction
+* **SEC Fundamental Thinking**: Extracts `analysis_summary`, `investment_thesis`, and `quarterly_analyses.detail` from comprehensive analysis
+* **Technical Analysis Thinking**: Extracts `thinking` field with detailed technical reasoning, plus `momentum_signals` and `risk_factors`
+* **Synthesis Reasoning**: Captures synthesis methodology and decision logic
+* **PDF Report Integration**: All thinking sections properly formatted and displayed in generated reports
+
+=== 🔧 Technical Score Extraction Fix
+* **File Format Handling**: Correctly parses technical analysis cache files with headers (`=== AI RESPONSE ===`)
+* **JSON Extraction**: Handles nested JSON data and direct field access (`technical_score: 5.5`)
+* **Fallback Mechanism**: PDF generator now uses file fallback when cache manager misses technical data
+* **Score Improvement**: Technical score properly extracted (5.5/10) leading to improved overall scores (7.1/10 vs 4.7/10)
+
+=== 📊 Enhanced PDF Reports
+* **Visual Components**: Added `ScoreCard` and `RecommendationBadge` flowable components
+* **Technical Summary Tables**: Structured display of support/resistance levels, trend direction, momentum signals
+* **Score Consolidation**: Removed duplicate scores (growth_prospects→growth_score, financial_health→fundamental_score)
+* **LLM Reasoning Sections**: Separate sections showing how SEC, technical, and synthesis models reached their conclusions
+
+=== 🏗️ Architecture Improvements
+* **Direct Extraction Pattern**: `_extract_sec_comprehensive_data()` and `_extract_technical_indicators()` methods
+* **Cache Optimization**: File fallback integration in report generator for technical analysis
+* **Template Separation**: Mode-specific Jinja2 templates with optimized prompt structures
+* **Score Consistency**: Unified scoring approach across fundamental, technical, and synthesis components
+
+== Known Issues and Bugs
+
+=== Critical Bugs
+
+==== SEC Fundamental Module
+
+1. **SQL Query Issues in LLMQueueProcessor**
+   - `_get_comprehensive_period_data`: SQL filters `fiscal_year` and `fiscal_period` directly but they're inside JSONB `metadata` column
+   - Fix: Use JSON operators like `metadata->>'fiscal_year' = :fy_val`
+
+2. **Frame API URL Format**
+   - Frame API requires numeric CIK without leading zeros (e.g., `320193` not `0000320193`)
+   - Fix: Use `int(cik_padded_str)` for URL construction
+
+3. **Uninitialized Variables**
+   - `financial_summary_for_prompt` may be uninitialized in `_analyze_quarterly_data`
+   - Fix: Initialize at method start
+
+==== Yahoo Technical Module
+
+1. **Division by Zero**
+   - Volume ratio calculation: `volume / latest.get('Volume_SMA_20', volume)`
+   - Stochastic/Williams %R: `(highest_high - lowest_low)` can be zero
+   - Fix: Add zero checks before division
+
+2. **Incorrect DataFrame Operations**
+   - `_create_enhanced_dataframe` assigns latest scalar values to entire DataFrame
+   - Fix: Calculate indicators as DataFrame columns during processing
+
+==== Synthesizer Module
+
+1. **Configuration Mismatches**
+   - Uses `self.config.paths.*` but config.json has flat structure
+   - Fix: Use `self.config.data_dir`, `self.config.reports_dir`
+
+2. **Hardcoded Model Names**
+   - Default model names don't match config.json
+   - Fix: Always use configured model names
+
+==== Database Issues
+
+1. **Table Name Mismatches**
+   - Code uses `llm_responses`, schema defines `llm_response_store`
+   - Code uses `sec_submissions`, schema defines `all_submission_store`
+   - Fix: Update schema to match code
+
+2. **Missing SQLAlchemy Models**
+   - DAOs operate on tables without corresponding ORM models
+   - Consider adding models for consistency
+
+=== Design Issues
+
+==== Rate Limiting
+- Per-instance rate limiters don't coordinate across services
+- SEC EDGAR has strict global limits
+- Consider centralized rate limiting service
+
+==== Error Handling
+- Many broad `except Exception` blocks
+- Should catch specific exceptions
+- Need better error logging for debugging
+
+==== Path Handling
+- Relative paths in config.json problematic
+- Should resolve to absolute paths based on project root
+
+==== Threading
+- LLMQueueProcessor thread may not clean up on exceptions
+- Consider context managers or better lifecycle management
+
+== Performance Optimization Opportunities
+
+=== Database
+- Use JSONB columns for better querying
+- Add indexes on frequently queried columns
+- Consider connection pooling configuration
+
+=== Caching
+- Evaluate cache TTLs based on data update frequency
+- Consider cache warming for frequently accessed data
+- Monitor cache hit rates
+
+=== Data Processing
+- Large HTML parsing can be slow
+- Pandas operations could be vectorized
+- Consider streaming for large datasets
+
+== Architecture Recommendations
+
+=== Design Patterns
+
+1. **Repository Pattern**: Already implemented via DAOs
+2. **Singleton Pattern**: Used appropriately for shared services
+3. **Strategy Pattern**: Consider for different analysis types
+4. **Builder Pattern**: Would help with complex prompt construction
+5. **Template Method**: Good for report generation hierarchy
+
+=== Modular Refactoring
+
+Suggested module structure:
+```
+core/
+  ├── config.py          # Centralized configuration
+  ├── exceptions.py      # Custom exceptions
+  └── constants.py       # Shared constants
+
+data_providers/
+  ├── sec/              # SEC data fetching
+  ├── market/           # Market data providers
+  └── mappers/          # Ticker/CIK mapping
+
+analysis/
+  ├── fundamental/      # Fundamental analysis
+  ├── technical/        # Technical analysis
+  └── synthesis/        # Combined analysis
+
+llm/
+  ├── interface.py      # LLM abstraction
+  ├── processors.py     # Queue processing
+  └── prompts/          # Prompt templates
+
+reporting/
+  ├── generators/       # Report generation
+  └── templates/        # Report templates
+
+persistence/
+  ├── models.py         # SQLAlchemy models
+  ├── daos.py          # Data access objects
+  └── cache/           # Cache implementations
+```
+
+== Database Schema Updates
+
+=== Required Changes
+
+1. Rename tables to match code:
+   - `llm_response_store` → `llm_responses`
+   - `all_submission_store` → `sec_submissions`
+
+2. Remove obsolete views:
+   - `quarterly_performance`
+   - `latest_analysis`
+   - `portfolio_overview`
+   - `llm_response_summary`
+   - `earnings_submission_materialized_view`
+
+3. Remove unused tables:
+   - `quarterly_ai_summaries`
+   - `stock_analysis`
+   - `sec_category_store`
+
+== Cache System Notes
+
+=== Cache Hierarchy
+- Memory (Priority 30) → Disk (Priority 10) → Database (Priority 5)
+- Automatic promotion of frequently accessed data
+- Write-through to all backends
+
+=== Compression Strategy
+- Disk: gzip level 9 (70-80% compression)
+- Database: PostgreSQL TOAST (50-70% compression)
+- Uniform across all cache types
+
+=== Performance Metrics
+- Disk read: 10-50ms
+- Database read: 50-200ms
+- Cache writes: 20-100ms
+- Monitor for operations >500ms
+
+== Testing Guidelines
+
+=== Current Coverage
+- 97 test cases with 100% success rate
+- Real integration tests (no mocks)
+- Performance validation included
+
+=== Areas Needing Tests
+- Edge cases for ticker validation
+- Database connection failures
+- LLM timeout scenarios
+- Cache corruption recovery
+
+== Security Considerations
+
+1. **Credentials**: Move to environment variables
+2. **API Keys**: Document which services need keys
+3. **Database**: Use connection encryption
+4. **Cache**: Consider encryption for sensitive data
+5. **Logs**: Ensure no sensitive data logged
+
+== Future Enhancements
+
+=== Short Term
+- Fix critical bugs listed above
+- Add comprehensive error handling
+- Improve logging consistency
+- Add progress indicators
+
+=== Medium Term
+- Implement async I/O
+- Add connection pooling
+- Stream large datasets
+- Add performance monitoring
+
+=== Long Term
+- Parallel processing support
+- Distributed caching (Redis)
+- Queue-based architecture
+- Real-time analysis capabilities
+
+== Development Workflow
+
+1. Run tests before commits: `./run_tests.sh`
+2. Check cache status: `./cache_manager.sh inspect`
+3. Monitor logs during development
+4. Use debug mode for troubleshooting
+5. Document configuration changes
+
+== Important File Locations
+
+- Main config: `config.json`
+- Database schema: `schema/consolidated_schema.sql`
+- Cache utilities: `utils/cache/`
+- Pattern implementations: `patterns/`
+- Test suites: `tests/`
+- Logs: `logs/`
+- Reports: `reports/`
+
+== Version History
+
+- v2.1: Current version with pattern-based architecture
+- Cache system refactored with uniform compression
+- Database schema consolidated
+- Test coverage at 100% (97 tests)

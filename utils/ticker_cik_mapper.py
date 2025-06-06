@@ -172,6 +172,38 @@ class TickerCIKMapper:
             return f"{int(cik):010d}"
         return None
     
+    def resolve_cik(self, symbol: str, provided_cik: str = None) -> Optional[str]:
+        """
+        Resolve CIK for a symbol, ensuring it's in proper zero-padded format
+        
+        Args:
+            symbol: Stock symbol
+            provided_cik: CIK if already known
+            
+        Returns:
+            Zero-padded CIK string (10 digits) or None if not found
+        """
+        if provided_cik:
+            try:
+                # Convert to integer and back to ensure valid CIK
+                cik_int = int(provided_cik)
+                if cik_int > 0:
+                    return f"{cik_int:010d}"
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid CIK format provided: {provided_cik}")
+        
+        # Look up CIK using ticker-CIK mapper
+        try:
+            cik = self.get_cik(symbol)
+            if cik:
+                cik_int = int(cik)
+                if cik_int > 0:
+                    return f"{cik_int:010d}"
+        except Exception as e:
+            logger.warning(f"Failed to resolve CIK for {symbol}: {e}")
+        
+        return None
+    
     def get_multiple_ciks(self, tickers: List[str]) -> Dict[str, Optional[str]]:
         """
         Get CIKs for multiple tickers.
@@ -252,7 +284,7 @@ def ticker_to_cik_padded(ticker: str) -> Optional[str]:
 
 if __name__ == "__main__":
     # Test the mapper
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=logging.INFO)
     
     mapper = TickerCIKMapper()
     

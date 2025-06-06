@@ -11,7 +11,7 @@ Handles all configuration settings for the Investment AI system
 import os
 import json
 import logging
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Any
 from dataclasses import dataclass, field
 from pathlib import Path
 from enum import Enum
@@ -40,7 +40,12 @@ class OllamaConfig:
     min_context_size: int
     num_llm_threads: int
     num_predict: Dict[str, int]
+    context_sizes: Dict[str, int] = field(default_factory=dict)  # Model-specific context sizes
     model_info_cache: Dict[str, Dict[str, int]] = field(default_factory=dict)  # Cache for model info
+    
+    def get_context_size(self, model_name: str) -> int:
+        """Get context size for specific model, fallback to min_context_size"""
+        return self.context_sizes.get(model_name, self.min_context_size)
     
 @dataclass
 class SECConfig:
@@ -132,36 +137,192 @@ class CacheConfig:
                 raise ValueError("table_name required for RDBMS cache")
 
 @dataclass
+class CacheHandlerConfig:
+    """Configuration for a specific cache handler (disk or rdbms)"""
+    enabled: bool = True
+    priority: int = 10
+    
+    # Handler-specific settings
+    settings: Dict[str, Any] = field(default_factory=dict)
+    
+    def __post_init__(self):
+        # Ensure settings is a dict
+        if self.settings is None:
+            self.settings = {}
+
+@dataclass
+class CacheTypeConfig:
+    """Configuration for a specific cache type"""
+    enabled: bool = True
+    ttl_hours: int = 24
+    
+    # Storage handler configurations
+    disk: CacheHandlerConfig = field(default_factory=lambda: CacheHandlerConfig(
+        enabled=True,
+        priority=20,
+        settings={
+            'base_path': 'data/{cache_type}_cache',
+            'file_pattern': '{symbol}_{key_suffix}.json.gz',
+            'compression': 'gzip',
+            'compression_level': 9,
+            'create_symbol_dirs': True
+        }
+    ))
+    
+    rdbms: CacheHandlerConfig = field(default_factory=lambda: CacheHandlerConfig(
+        enabled=True,
+        priority=10,
+        settings={
+            'table_suffix': '_store',
+            'upsert_on_conflict': True,
+            'connection_pool': 'default'
+        }
+    ))
+
+@dataclass
 class CacheControlConfig:
     """
-    Global cache control configuration using list-based approach
+    Comprehensive cache control configuration.
     
-    Configuration:
-    - storage: List of enabled storage backends ["disk", "rdbms"]
-        Empty list = no caching
-        ["disk"] = disk only
-        ["rdbms"] = database only
-        ["disk", "rdbms"] = both (default)
-        
-    - types: List of enabled cache types ["sec", "llm", "technical", "submission", "company_facts", "quarterly_metrics"]
-        Empty list = no caching
-        Specific types = only those types enabled
-        If not specified, all types are enabled
+    Provides fine-grained control over:
+    - Cache types and their TTLs
+    - Storage handlers (disk/rdbms) per cache type
+    - Handler-specific settings (paths, compression, etc.)
+    - Global cache behavior (read/write/refresh)
     """
-    storage: List[str] = field(default_factory=lambda: ["disk", "rdbms"])
-    types: Optional[List[str]] = None  # None means all types enabled
+    # Global cache behavior
+    read_from_cache: bool = True
+    write_to_cache: bool = True
+    force_refresh: bool = False
+    force_refresh_symbols: Optional[List[str]] = None
     
-    # Cache behavior
-    read_from_cache: bool = True  # Allow reading from cache
-    write_to_cache: bool = True  # Allow writing to cache
-    force_refresh: bool = False  # If True, ignore cache and fetch fresh data
-    force_refresh_symbols: Optional[List[str]] = None  # Force refresh for specific symbols
-    cache_ttl_override: Optional[int] = None  # Override TTL in hours for all caches
+    # Cache type configurations with natural key patterns
+    cache_types: Dict[str, CacheTypeConfig] = field(default_factory=lambda: {
+        'sec_response': CacheTypeConfig(
+            ttl_hours=2160,  # 90 days - SEC API calls are rate-limited and expensive
+            disk=CacheHandlerConfig(priority=20, settings={
+                'base_path': 'data/sec_cache',
+                'file_pattern': '{symbol}/{symbol}_quarterly_summary_{fiscal_year}-{fiscal_period}.json.gz',
+                'natural_key_order': ['symbol', 'fiscal_year', 'fiscal_period', 'form_type', 'category'],
+                'compression': 'gzip',
+                'compression_level': 9,
+                'create_symbol_dirs': True
+            }),
+            rdbms=CacheHandlerConfig(priority=10, settings={
+                'table_name': 'sec_responses',
+                'natural_key_order': ['symbol', 'fiscal_year', 'fiscal_period', 'form_type', 'category'],
+                'upsert_on_conflict': True
+            })
+        ),
+        'llm_response': CacheTypeConfig(
+            ttl_hours=720,  # 30 days - LLM calls are expensive
+            disk=CacheHandlerConfig(priority=20, settings={
+                'base_path': 'data/llm_cache',
+                'file_pattern': '{symbol}_{llm_type}.json.gz',  # Simplified pattern
+                'natural_key_order': ['symbol', 'llm_type'],
+                'compression': 'gzip',
+                'compression_level': 9,
+                'create_symbol_dirs': True
+            }),
+            rdbms=CacheHandlerConfig(priority=10, settings={
+                'table_name': 'llm_responses',
+                'natural_key_order': ['symbol', 'fiscal_year', 'fiscal_period', 'llm_type'],
+                'upsert_on_conflict': True
+            })
+        ),
+        'technical_data': CacheTypeConfig(
+            ttl_hours=24,  # 1 day - technical data changes frequently
+            disk=CacheHandlerConfig(priority=20, settings={
+                'base_path': 'data/technical_cache',
+                'file_pattern': '{symbol}/{analysis_date}_technical.parquet',
+                'natural_key_order': ['symbol', 'analysis_date'],
+                'compression': 'gzip',
+                'compression_level': 9,
+                'engine': 'fastparquet',
+                'create_symbol_dirs': True
+            }),
+            rdbms=CacheHandlerConfig(enabled=False)  # Technical data uses parquet only
+        ),
+        'submission_data': CacheTypeConfig(
+            ttl_hours=168,  # 7 days - staggered refresh for Russell 1000
+            disk=CacheHandlerConfig(priority=20, settings={
+                'base_path': 'data/sec_cache/submissions',
+                'file_pattern': '{symbol}_{cik}_submissions.json.gz',
+                'natural_key_order': ['symbol', 'cik'],
+                'compression': 'gzip',
+                'compression_level': 9,
+                'enable_staggered_ttl': True,  # Enable symbol-specific TTL
+                'ttl_strategy': 'russell_1000_weekly'
+            }),
+            rdbms=CacheHandlerConfig(priority=10, settings={
+                'table_name': 'sec_submissions',
+                'natural_key_order': ['symbol', 'cik'],
+                'upsert_on_conflict': True,
+                'enable_staggered_ttl': True
+            })
+        ),
+        'company_facts': CacheTypeConfig(
+            ttl_hours=168,  # 7 days - aligned with submission refresh strategy
+            disk=CacheHandlerConfig(priority=20, settings={
+                'base_path': 'data/sec_cache/facts',
+                'file_pattern': '{symbol}_{cik}_companyfacts.json.gz',
+                'natural_key_order': ['symbol', 'cik'],
+                'compression': 'gzip',
+                'compression_level': 9,
+                'enable_staggered_ttl': True,
+                'ttl_strategy': 'russell_1000_weekly'
+            }),
+            rdbms=CacheHandlerConfig(priority=10, settings={
+                'table_name': 'sec_companyfacts',
+                'natural_key_order': ['symbol', 'cik'],
+                'upsert_on_conflict': True,
+                'enable_staggered_ttl': True,
+                'partition_by_symbol': True  # Optimize for CIK-based queries
+            })
+        ),
+        'quarterly_metrics': CacheTypeConfig(
+            ttl_hours=2160,  # 90 days to align with quarterly announcements
+            disk=CacheHandlerConfig(priority=20, settings={
+                'base_path': 'data/sec_cache',
+                'file_pattern': '{symbol}/{symbol}_quarterly_metrics_{fiscal_year}-{fiscal_period}.json.gz',
+                'natural_key_order': ['symbol', 'fiscal_year', 'fiscal_period', 'form_type'],
+                'compression': 'gzip',
+                'compression_level': 9,
+                'create_symbol_dirs': True
+            }),
+            rdbms=CacheHandlerConfig(priority=10, settings={
+                'table_name': 'quarterly_metrics',
+                'natural_key_order': ['symbol', 'fiscal_year', 'fiscal_period', 'form_type'],
+                'upsert_on_conflict': True
+            })
+        )
+    })
+    
+    # Backward compatibility properties
+    @property
+    def storage(self) -> List[str]:
+        """Get list of enabled storage backends"""
+        storage = []
+        for cache_type, config in self.cache_types.items():
+            if config.disk.enabled and 'disk' not in storage:
+                storage.append('disk')
+            if config.rdbms.enabled and 'rdbms' not in storage:
+                storage.append('rdbms')
+        return storage
+    
+    @property
+    def types(self) -> Optional[List[str]]:
+        """Get list of enabled cache types"""
+        enabled_types = [
+            cache_type for cache_type, config in self.cache_types.items()
+            if config.enabled
+        ]
+        return enabled_types if enabled_types else None
     
     @property
     def use_cache(self) -> bool:
         """Check if caching is enabled at all"""
-        return bool(self.storage) and (self.types is None or bool(self.types))
+        return bool(self.storage) and bool(self.types)
     
     @property
     def use_disk_cache(self) -> bool:
@@ -177,33 +338,86 @@ class CacheControlConfig:
         """Check if a specific cache type is enabled"""
         if not self.use_cache:
             return False
-            
-        # If types not specified, all are enabled
-        if self.types is None:
-            return True
-            
+        
         # Map from CacheType enum values to config strings
         type_map = {
-            "sec_response": "sec",
-            "llm_response": "llm", 
-            "technical_data": "technical",
-            "submission_data": "submission",
+            "sec_response": "sec_response",
+            "llm_response": "llm_response", 
+            "technical_data": "technical_data",
+            "submission_data": "submission_data",
             "company_facts": "company_facts",
             "quarterly_metrics": "quarterly_metrics"
         }
         
-        # Also support direct names
-        direct_map = {
-            "sec": "sec",
-            "llm": "llm",
-            "technical": "technical",
-            "submission": "submission",
+        config_name = type_map.get(cache_type, cache_type)
+        cache_config = self.cache_types.get(config_name)
+        return cache_config is not None and cache_config.enabled
+    
+    def get_cache_config(self, cache_type: str) -> Optional[CacheTypeConfig]:
+        """Get configuration for a specific cache type"""
+        type_map = {
+            "sec_response": "sec_response",
+            "llm_response": "llm_response", 
+            "technical_data": "technical_data",
+            "submission_data": "submission_data",
             "company_facts": "company_facts",
             "quarterly_metrics": "quarterly_metrics"
         }
         
-        config_name = type_map.get(cache_type, direct_map.get(cache_type, cache_type))
-        return config_name in self.types
+        config_name = type_map.get(cache_type, cache_type)
+        return self.cache_types.get(config_name)
+
+@dataclass
+class VectorDBConfig:
+    """Vector database configuration for semantic search capabilities"""
+    enabled: bool = False
+    
+    # Storage paths
+    db_path: str = "data/vector_db"
+    
+    # Embedding configuration  
+    embedding_model: str = "all-MiniLM-L6-v2"  # SentenceTransformers model
+    embedding_dimension: int = 384  # Dimension for all-MiniLM-L6-v2
+    
+    # RocksDB configuration
+    rocksdb_max_open_files: int = 300000
+    rocksdb_write_buffer_size: int = 67108864  # 64MB
+    rocksdb_max_write_buffer_number: int = 3
+    rocksdb_compression: str = "lz4"  # lz4, snappy, zlib, bz2, zstd
+    
+    # FAISS configuration
+    faiss_index_type: str = "IndexFlatIP"  # Inner Product for cosine similarity
+    faiss_normalize_embeddings: bool = True
+    
+    # Content processing
+    max_content_length: int = 5000  # Max chars for embedding generation
+    min_content_length: int = 50   # Min chars to consider for vectorization
+    
+    # Event analysis - driven by submission router
+    enable_event_analysis: bool = True
+    event_analysis_forms: List[str] = field(default_factory=lambda: ["8-K", "8-K/A", "DEF 14A", "4", "13D", "13G"])
+    event_storage_ttl_hours: int = 168  # 7 days for event data
+    
+    # Submission-driven processing
+    submission_driven_mode: bool = True  # Process events from submission data
+    event_extraction_batch_size: int = 10  # Process events in batches
+    
+    # Cache integration with submission lifecycle
+    vector_cache_priority: int = 5  # Priority vs other cache handlers
+    enable_promotion: bool = True   # Promote frequently accessed content to vector cache
+    integrate_with_submission_ttl: bool = True  # Use submission TTL strategy
+    
+    # Performance settings
+    batch_size: int = 32           # Batch size for embedding generation
+    max_search_results: int = 100  # Max results to return from similarity search
+    similarity_threshold: float = 0.5  # Minimum similarity score
+    
+    def get_storage_path(self, sub_path: str = "") -> str:
+        """Get path for vector storage components"""
+        base = Path(self.db_path)
+        if sub_path:
+            return str(base / sub_path)
+        return str(base)
 
 @dataclass
 class ParquetConfig:
@@ -433,15 +647,26 @@ class Config:
         caching_data = config_data.get('caching', {})
         self.caching = self._build_caching_config(caching_data)
         
-        # Cache control config
-        cache_control_config = self._default_cache_control()
-        cache_control_config.update(config_data.get('cache_control', {}))
-        self.cache_control = CacheControlConfig(**cache_control_config)
+        # Cache control config (using new structure, ignore old format)
+        cache_control_data = config_data.get('cache_control', {})
+        # Only use new format fields, ignore legacy ones
+        new_cache_control = {
+            'read_from_cache': cache_control_data.get('read_from_cache', True),
+            'write_to_cache': cache_control_data.get('write_to_cache', True),
+            'force_refresh': cache_control_data.get('force_refresh', False),
+            'force_refresh_symbols': cache_control_data.get('force_refresh_symbols', None)
+        }
+        self.cache_control = CacheControlConfig(**new_cache_control)
         
         # Parquet config
         parquet_config = self._default_parquet()
         parquet_config.update(config_data.get('parquet', {}))
         self.parquet = ParquetConfig(**parquet_config)
+        
+        # Vector database config
+        vector_db_config = self._default_vector_db()
+        vector_db_config.update(config_data.get('vector_db', {}))
+        self.vector_db = VectorDBConfig(**vector_db_config)
         
         # Other settings
         self.stocks_to_track = config_data.get('stocks_to_track', self._default_stocks())
@@ -507,14 +732,14 @@ class Config:
             'models': {
                 'fundamental_analysis': 'llama3.1:8b-instruct-q8_0',
                 'technical_analysis': 'llama3.1:8b-instruct-q8_0',
-                'report_generation': 'llama3.1:8b-instruct-q8_0',
-                'synthesizer': 'llama3.1:8b-instruct-q8_0'
+                'report_generation': 'qwen3-30b-40k-financial:latest',
+                'synthesizer': 'qwen3-30b-40k-financial:latest'
             },
             'num_predict': {
                 'fundamental_analysis': 2048,
-                'technical_analysis': 1536,
+                'technical_analysis': 2048,
                 'report_generation': 2048,
-                'synthesizer': 1536
+                'synthesizer': 2048
             }
         }
     
@@ -975,8 +1200,8 @@ class Config:
                         "employee_benefit_plans_note": ["us-gaap:DefinedBenefitPlanNetPeriodicBenefitCost"]
                         }
                 },
-            'require_submissions': True,
-            'max_periods_to_analyze': 4,
+            'require_submissions': False,
+            'max_periods_to_analyze': 8,
             'include_amended_filings': True
         }
     
@@ -1009,7 +1234,7 @@ class Config:
         return {
             'symbol_log_max_bytes': 1024 * 1024,  # 1MB
             'symbol_log_backup_count': 5,
-            'symbol_log_format': '%(levelname)s - %(name)s - %(message)s',
+            'symbol_log_format': '%(asctime)s - %(levelname)s - %(name)s:%(lineno)d - %(message)s',
             'main_log_max_bytes': 5 * 1024 * 1024,  # 5MB
             'main_log_backup_count': 10,
             'main_log_format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -1033,6 +1258,30 @@ class Config:
             'pyarrow_compression_level': 9,  # Maximum compression
             'use_dictionary': True,
             'row_group_size': None
+        }
+    
+    def _default_vector_db(self) -> Dict:
+        """Default vector database configuration"""
+        return {
+            'enabled': False,  # Disabled by default - user must opt-in
+            'db_path': 'data/vector_db',
+            'embedding_model': 'all-MiniLM-L6-v2',
+            'embedding_dimension': 384,
+            'rocksdb_max_open_files': 300000,
+            'rocksdb_write_buffer_size': 67108864,
+            'rocksdb_max_write_buffer_number': 3,
+            'rocksdb_compression': 'lz4',
+            'faiss_index_type': 'IndexFlatIP',
+            'faiss_normalize_embeddings': True,
+            'max_content_length': 5000,
+            'min_content_length': 50,
+            'enable_event_analysis': True,
+            'event_analysis_forms': ['8-K', '10-Q', '10-K'],
+            'vector_cache_priority': 5,
+            'enable_promotion': True,
+            'batch_size': 32,
+            'max_search_results': 100,
+            'similarity_threshold': 0.5
         }
     
     def _default_cache_control(self) -> Dict:
@@ -1267,7 +1516,7 @@ class Config:
             "logging": {
                 "symbol_log_max_bytes": 1048576,
                 "symbol_log_backup_count": 5,
-                "symbol_log_format": "%(levelname)s - %(name)s - %(message)s",
+                "symbol_log_format": "%(asctime)s - %(levelname)s - %(name)s - %(message)s",
                 "main_log_max_bytes": 5242880,
                 "main_log_backup_count": 10,
                 "main_log_format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -1348,6 +1597,27 @@ class Config:
                     "data_column": "interaction_data",
                     "max_entries": 50000
                 }
+            },
+            "vector_db": {
+                "enabled": False,
+                "db_path": "data/vector_db",
+                "embedding_model": "all-MiniLM-L6-v2",
+                "embedding_dimension": 384,
+                "rocksdb_max_open_files": 300000,
+                "rocksdb_write_buffer_size": 67108864,
+                "rocksdb_max_write_buffer_number": 3,
+                "rocksdb_compression": "lz4",
+                "faiss_index_type": "IndexFlatIP",
+                "faiss_normalize_embeddings": True,
+                "max_content_length": 5000,
+                "min_content_length": 50,
+                "enable_event_analysis": True,
+                "event_analysis_forms": ["8-K", "10-Q", "10-K"],
+                "vector_cache_priority": 5,
+                "enable_promotion": True,
+                "batch_size": 32,
+                "max_search_results": 100,
+                "similarity_threshold": 0.5
             }
         }
         

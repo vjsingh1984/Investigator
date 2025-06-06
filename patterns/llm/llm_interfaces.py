@@ -53,6 +53,7 @@ class LLMTaskType(Enum):
     TECHNICAL_ANALYSIS = "technical_analysis"
     SYNTHESIS = "synthesis"
     QUARTERLY_SUMMARY = "quarterly_summary"
+    COMPREHENSIVE_ANALYSIS = "comprehensive_analysis"
     RISK_ASSESSMENT = "risk_assessment"
     
 class LLMPriority(Enum):

@@ -50,21 +50,33 @@ class ParquetCacheStorageHandler(CacheStorageHandler):
     def _normalize_key(self, key: Union[Tuple, Dict]) -> Dict[str, Any]:
         """Normalize cache key to dictionary format"""
         if isinstance(key, tuple):
-            # For technical data: (symbol, data_type, timeframe)
+            # Handle different tuple formats
             if len(key) >= 3:
+                # Format: (symbol, data_type, timeframe) - e.g., ('AAPL', 'technical_data', '365d')
                 return {
                     'symbol': key[0],
                     'data_type': key[1],
                     'timeframe': key[2]
                 }
             elif len(key) >= 2:
-                return {
-                    'symbol': key[0],
-                    'data_type': key[1],
-                    'timeframe': 'default'
-                }
+                # Format: (symbol, timeframe) - e.g., ('AAPL', 'recent_365')
+                # or (symbol, data_type) - e.g., ('AAPL', 'technical_data')
+                if key[1].startswith('recent_') or key[1].endswith('d'):
+                    # It's a timeframe
+                    return {
+                        'symbol': key[0],
+                        'data_type': 'technical_data',
+                        'timeframe': key[1]
+                    }
+                else:
+                    # It's a data type
+                    return {
+                        'symbol': key[0],
+                        'data_type': key[1],
+                        'timeframe': 'default'
+                    }
             else:
-                return {'symbol': key[0], 'data_type': 'default', 'timeframe': 'default'}
+                return {'symbol': key[0], 'data_type': 'technical_data', 'timeframe': 'default'}
         return key
     
     def _get_file_path(self, key_dict: Dict[str, Any]) -> Path:
@@ -111,15 +123,15 @@ class ParquetCacheStorageHandler(CacheStorageHandler):
                     'cache_info': {
                         'cached_at': metadata.get('cached_at'),
                         'cache_type': self.cache_type.value,
-                        'compression': self.compression,
+                        'compression': metadata.get('compression', 'gzip'),
                         'records': len(df)
                     }
                 }
                 
-                logger.debug(f"Cache hit (parquet): {file_path}")
+                logger.debug(f"✅ Parquet cache HIT: {file_path} ({len(df)} records, {metadata.get('compression', 'unknown')} compression)")
                 return data
             
-            logger.debug(f"Cache miss (parquet): {file_path}")
+            logger.debug(f"❌ Parquet cache MISS: {file_path} (exists: {file_path.exists()}, meta exists: {metadata_path.exists()})")
             return None
             
         except Exception as e:
@@ -196,7 +208,7 @@ class ParquetCacheStorageHandler(CacheStorageHandler):
             with open(metadata_path, 'w') as f:
                 json.dump(metadata, f, indent=2)
             
-            logger.debug(f"Cached to parquet: {file_path} ({len(df)} records, {file_path.stat().st_size} bytes)")
+            logger.info(f"✅ Cached to parquet: {file_path} ({len(df)} records, {file_path.stat().st_size:,} bytes, {self.parquet_config.compression} compression)")
             return True
             
         except Exception as e:
@@ -209,9 +221,19 @@ class ParquetCacheStorageHandler(CacheStorageHandler):
             key_dict = self._normalize_key(key)
             file_path = self._get_file_path(key_dict)
             metadata_path = self._get_metadata_path(file_path)
-            return file_path.exists() and metadata_path.exists()
+            
+            exists = file_path.exists() and metadata_path.exists()
+            
+            if exists:
+                # Get file size for logging
+                file_size = file_path.stat().st_size
+                logger.debug(f"📁 Parquet cache EXISTS: {file_path} ({file_size:,} bytes)")
+            else:
+                logger.debug(f"📂 Parquet cache NOT EXISTS: {file_path} (file: {file_path.exists()}, meta: {metadata_path.exists()})")
+            
+            return exists
         except Exception as e:
-            logger.error(f"Error checking parquet cache existence: {e}")
+            logger.error(f"💥 Error checking parquet cache existence: {e}")
             return False
     
     def delete(self, key: Union[Tuple, Dict]) -> bool:
@@ -239,8 +261,47 @@ class ParquetCacheStorageHandler(CacheStorageHandler):
             logger.error(f"Error deleting from parquet cache: {e}")
             return False
     
+    def delete_by_symbol(self, symbol: str) -> int:
+        """
+        Optimized symbol-based deletion for Parquet cache using symbol directories.
+        Deletes entire symbol directory for clean isolation.
+        
+        Structure: data/technical_cache/{symbol}/
+        
+        Args:
+            symbol: Stock symbol (e.g., 'AAPL')
+            
+        Returns:
+            Number of files deleted
+        """
+        try:
+            deleted_count = 0
+            symbol = symbol.upper()  # Normalize to uppercase
+            
+            # Delete symbol-specific directory (already using symbol directories)
+            symbol_dir = self.base_path / symbol
+            if symbol_dir.exists() and symbol_dir.is_dir():
+                import shutil
+                try:
+                    # Count files before deletion for accurate reporting
+                    file_count = sum(1 for _ in symbol_dir.rglob("*") if _.is_file())
+                    shutil.rmtree(symbol_dir)
+                    deleted_count = file_count
+                    logger.info(f"Deleted symbol directory with {file_count} files: {symbol_dir}")
+                except Exception as e:
+                    logger.error(f"Error deleting symbol directory {symbol_dir}: {e}")
+            else:
+                logger.debug(f"Symbol directory does not exist: {symbol_dir}")
+            
+            logger.info(f"Symbol cleanup [{self.__class__.__name__}]: Deleted {deleted_count} parquet files for symbol {symbol}")
+            return deleted_count
+            
+        except Exception as e:
+            logger.error(f"Error deleting by symbol '{symbol}' from parquet cache: {e}")
+            return 0
+    
     def delete_by_pattern(self, pattern: str) -> int:
-        """Delete all cache entries matching a pattern"""
+        """Delete all cache entries matching a pattern (legacy method)"""
         try:
             import fnmatch
             deleted_count = 0

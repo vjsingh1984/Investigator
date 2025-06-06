@@ -45,9 +45,11 @@ class RdbmsCacheStorageHandler(CacheStorageHandler):
         
         # Import here to avoid circular dependencies
         from utils.db import (
-            get_sec_response_store_dao,
-            get_llm_response_store_dao,
+            get_sec_responses_dao,
+            get_llm_responses_dao,
             get_quarterly_metrics_dao,
+            get_sec_companyfacts_dao,
+            get_sec_submissions_dao,
             DatabaseManager
         )
         
@@ -56,14 +58,15 @@ class RdbmsCacheStorageHandler(CacheStorageHandler):
         
         # Initialize appropriate DAO based on cache type
         if cache_type == CacheType.SEC_RESPONSE:
-            self.dao = get_sec_response_store_dao()
+            self.dao = get_sec_responses_dao()
         elif cache_type == CacheType.LLM_RESPONSE:
-            self.dao = get_llm_response_store_dao()
+            self.dao = get_llm_responses_dao()
         elif cache_type == CacheType.QUARTERLY_METRICS:
             self.dao = get_quarterly_metrics_dao()
-        elif cache_type in [CacheType.SUBMISSION_DATA, CacheType.COMPANY_FACTS]:
-            # For submission/company facts, use DatabaseManager directly
-            self.dao = None  # Use raw SQL for these operations
+        elif cache_type == CacheType.COMPANY_FACTS:
+            self.dao = get_sec_companyfacts_dao()
+        elif cache_type == CacheType.SUBMISSION_DATA:
+            self.dao = get_sec_submissions_dao()
         else:
             raise ValueError(f"Unsupported cache type for RDBMS: {cache_type}")
     
@@ -109,31 +112,20 @@ class RdbmsCacheStorageHandler(CacheStorageHandler):
                         return result
                         
             elif self.cache_type == CacheType.SUBMISSION_DATA:
-                # Fetch from all_submission_store or materialized view
+                # Fetch from sec_submissions table (no materialized view)
                 symbol = key_dict.get('symbol')
                 cik = key_dict.get('cik')
                 
-                if symbol:
-                    from utils.db import get_all_submission_store_dao
-                    dao = get_all_submission_store_dao()
+                # Only proceed if we have both symbol and CIK
+                if symbol and cik:
+                    from utils.db import get_sec_submissions_dao
+                    dao = get_sec_submissions_dao()
                     
-                    # First try to get recent earnings submissions from materialized view
-                    recent_submissions = dao.get_recent_earnings_submissions(symbol, limit=4)
-                    if recent_submissions:
-                        logger.debug(f"Cache hit (RDBMS): Recent submissions for {symbol} from materialized view")
+                    # Get submission data directly from sec_submissions table
+                    result = dao.get_submission(symbol, cik, max_age_days=7)
+                    if result:
+                        logger.debug(f"Cache hit (RDBMS): Submission data for {symbol}")
                         return {
-                            'symbol': symbol,
-                            'cik': recent_submissions[0]['cik'],
-                            'company_name': recent_submissions[0]['company_name'],
-                            'recent_submissions': recent_submissions
-                        }
-                    
-                    # Fallback to all_submission_store if we have CIK
-                    if cik:
-                        result = dao.get_submission(symbol, cik, max_age_days=7)
-                        if result:
-                            logger.debug(f"Cache hit (RDBMS): Submission data for {symbol}")
-                            return {
                                 'symbol': symbol,
                                 'cik': cik,
                                 'company_name': result['company_name'],
@@ -146,8 +138,8 @@ class RdbmsCacheStorageHandler(CacheStorageHandler):
                 symbol = key_dict.get('symbol')
                 
                 if symbol:
-                    from utils.db import get_all_companyfacts_store_dao
-                    dao = get_all_companyfacts_store_dao()
+                    from utils.db import get_sec_companyfacts_dao
+                    dao = get_sec_companyfacts_dao()
                     result = dao.get_company_facts(symbol)
                     
                     if result:
@@ -193,7 +185,7 @@ class RdbmsCacheStorageHandler(CacheStorageHandler):
                     symbol=key_dict.get('symbol'),
                     form_type=key_dict.get('form_type', 'N/A'),
                     period=key_dict.get('period', 'N/A'),
-                    prompt_context=value.get('prompt_context', {}),
+                    prompt=value.get('prompt', ''),
                     model_info=value.get('model_info', {}),
                     response=value.get('response', {}),
                     metadata=value.get('metadata', {}),
@@ -206,8 +198,8 @@ class RdbmsCacheStorageHandler(CacheStorageHandler):
                 cik = key_dict.get('cik')
                 
                 if symbol and cik:
-                    from utils.db import get_all_submission_store_dao
-                    dao = get_all_submission_store_dao()
+                    from utils.db import get_sec_submissions_dao
+                    dao = get_sec_submissions_dao()
                     
                     # Extract latest filing date if available
                     latest_filing_date = None
@@ -235,8 +227,8 @@ class RdbmsCacheStorageHandler(CacheStorageHandler):
                 symbol = key_dict.get('symbol')
                 
                 if symbol:
-                    from utils.db import get_all_companyfacts_store_dao
-                    dao = get_all_companyfacts_store_dao()
+                    from utils.db import get_sec_companyfacts_dao
+                    dao = get_sec_companyfacts_dao()
                     
                     # Handle both direct company facts and wrapped data
                     if 'companyfacts' in value:
@@ -311,52 +303,108 @@ class RdbmsCacheStorageHandler(CacheStorageHandler):
         try:
             key_dict = self._normalize_key(key)
             symbol = key_dict.get('symbol', '')
-            category = key_dict.get('category', '')
             
             if not symbol:
                 logger.warning("Cannot delete from RDBMS cache without symbol")
                 return False
             
-            with self.db_manager.get_session() as session:
-                # Delete from llm_response_store
-                if category:
-                    result = session.execute(
-                        text("DELETE FROM llm_response_store WHERE symbol = :symbol AND response_type LIKE :category"),
-                        {"symbol": symbol, "category": f"%{category}%"}
-                    )
-                else:
-                    result = session.execute(
-                        text("DELETE FROM llm_response_store WHERE symbol = :symbol"),
-                        {"symbol": symbol}
-                    )
+            # Use DAO methods for deletion based on cache type
+            if self.cache_type == CacheType.LLM_RESPONSE and self.dao:
+                form_type = key_dict.get('form_type')
+                period = key_dict.get('period')
+                llm_type = key_dict.get('llm_type')
                 
-                deleted_count = result.rowcount
-                session.commit()
-                
-                logger.info(f"Deleted {deleted_count} entries from RDBMS cache for symbol '{symbol}'")
+                deleted_count = self.dao.delete_llm_responses(
+                    symbol=symbol,
+                    form_type=form_type,
+                    period=period,
+                    llm_type=llm_type
+                )
                 return deleted_count > 0
+            else:
+                # For other cache types, fall back to basic deletion
+                # This would need to be implemented for each cache type
+                logger.warning(f"Delete operation not implemented for cache type: {self.cache_type}")
+                return False
                 
         except Exception as e:
             logger.error(f"Error deleting from RDBMS cache: {e}")
             return False
     
-    def delete_by_pattern(self, pattern: str) -> int:
-        """Delete all cache entries matching a pattern"""
+    def delete_by_symbol(self, symbol: str) -> int:
+        """
+        Optimized symbol-based deletion for RDBMS cache.
+        Uses SQL queries with symbol column for efficient deletion.
+        
+        Args:
+            symbol: Stock symbol (e.g., 'AAPL')
+            
+        Returns:
+            Number of records deleted
+        """
         try:
-            with self.db_manager.get_session() as session:
+            deleted_count = 0
+            symbol = symbol.upper()  # Normalize to uppercase
+            
+            # Delete based on cache type using appropriate DAO methods
+            if self.cache_type == CacheType.LLM_RESPONSE and self.dao:
+                # Delete all LLM responses for this symbol across all form types
+                deleted_count = self.dao.delete_llm_responses_by_pattern(
+                    symbol_pattern=symbol,
+                    form_type_pattern='%'
+                )
+                logger.info(f"Symbol cleanup [RDBMS-LLM]: Deleted {deleted_count} LLM responses for symbol {symbol}")
+                
+            elif self.cache_type == CacheType.SUBMISSION_DATA:
+                # Delete submission data for this symbol
+                from utils.db import get_sec_submissions_dao
+                dao = get_sec_submissions_dao()
+                if hasattr(dao, 'delete_submissions_by_symbol'):
+                    deleted_count = dao.delete_submissions_by_symbol(symbol)
+                    logger.info(f"Symbol cleanup [RDBMS-SUB]: Deleted {deleted_count} submissions for symbol {symbol}")
+                
+            elif self.cache_type == CacheType.COMPANY_FACTS:
+                # Delete company facts for this symbol
+                from utils.db import get_sec_companyfacts_dao
+                dao = get_sec_companyfacts_dao()
+                if hasattr(dao, 'delete_companyfacts_by_symbol'):
+                    deleted_count = dao.delete_companyfacts_by_symbol(symbol)
+                    logger.info(f"Symbol cleanup [RDBMS-CF]: Deleted {deleted_count} company facts for symbol {symbol}")
+                
+            elif self.cache_type == CacheType.QUARTERLY_METRICS:
+                # Delete quarterly metrics for this symbol
+                from utils.db import get_quarterly_metrics_dao
+                dao = get_quarterly_metrics_dao()
+                if hasattr(dao, 'delete_metrics_by_symbol'):
+                    deleted_count = dao.delete_metrics_by_symbol(symbol)
+                    logger.info(f"Symbol cleanup [RDBMS-QM]: Deleted {deleted_count} quarterly metrics for symbol {symbol}")
+                
+            else:
+                logger.debug(f"Symbol deletion not implemented for cache type: {self.cache_type}")
+                return 0
+            
+            return deleted_count
+            
+        except Exception as e:
+            logger.error(f"Error deleting by symbol '{symbol}' from RDBMS cache: {e}")
+            return 0
+    
+    def delete_by_pattern(self, pattern: str) -> int:
+        """Delete all cache entries matching a pattern (legacy method)"""
+        try:
+            # Use DAO methods for deletion based on cache type
+            if self.cache_type == CacheType.LLM_RESPONSE and self.dao:
                 # Convert file pattern to SQL LIKE pattern
                 sql_pattern = pattern.replace('*', '%').replace('?', '_')
                 
-                result = session.execute(
-                    text("DELETE FROM llm_response_store WHERE symbol LIKE :pattern OR response_type LIKE :pattern"),
-                    {"pattern": sql_pattern}
+                deleted_count = self.dao.delete_llm_responses_by_pattern(
+                    symbol_pattern=sql_pattern,
+                    form_type_pattern=sql_pattern
                 )
-                
-                deleted_count = result.rowcount
-                session.commit()
-                
-                logger.info(f"Deleted {deleted_count} entries from RDBMS cache matching pattern '{pattern}'")
                 return deleted_count
+            else:
+                logger.warning(f"Delete by pattern operation not implemented for cache type: {self.cache_type}")
+                return 0
                 
         except Exception as e:
             logger.error(f"Error deleting by pattern from RDBMS cache: {e}")
@@ -365,17 +413,18 @@ class RdbmsCacheStorageHandler(CacheStorageHandler):
     def clear_all(self) -> bool:
         """Clear all data from RDBMS cache"""
         try:
-            with self.db_manager.get_session() as session:
-                # Get count before deletion
-                result = session.execute(text("SELECT COUNT(*) FROM llm_response_store"))
-                count = result.scalar()
-                
-                # Clear all LLM response cache data
-                session.execute(text("DELETE FROM llm_response_store"))
-                session.commit()
-                
-                logger.info(f"Cleared all RDBMS cache data ({count} entries)")
+            # Use DAO methods for deletion based on cache type
+            if self.cache_type == CacheType.LLM_RESPONSE and self.dao:
+                # Delete all LLM responses using wildcard pattern
+                deleted_count = self.dao.delete_llm_responses_by_pattern(
+                    symbol_pattern='%',
+                    form_type_pattern='%'
+                )
+                logger.info(f"Cleared all RDBMS cache data ({deleted_count} entries)")
                 return True
+            else:
+                logger.warning(f"Clear all operation not implemented for cache type: {self.cache_type}")
+                return False
                 
         except Exception as e:
             logger.error(f"Error clearing RDBMS cache: {e}")

@@ -13,7 +13,7 @@ from enum import Enum
 class CacheType(Enum):
     """Types of cache storage"""
     SEC_RESPONSE = "sec_response"
-    LLM_RESPONSE = "llm_response"
+    LLM_RESPONSE = "llm_response"  # Stores both prompt and response together
     TECHNICAL_DATA = "technical_data"
     SUBMISSION_DATA = "submission_data"  # For all_submission_store - RDBMS only
     COMPANY_FACTS = "company_facts"

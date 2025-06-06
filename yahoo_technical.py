@@ -29,13 +29,14 @@ except ImportError:
     TALIB_AVAILABLE = False
     logging.warning("talib not available - using pandas for technical indicators")
 
+from utils.technical_indicators import get_technical_calculator
+
 from config import get_config
-from utils.db import get_technical_indicators_dao, get_stock_analysis_dao, DatabaseManager, get_llm_response_store_dao
 from utils.cache import CacheType
 from data.models import TechnicalAnalysisData
 from utils.cache.cache_manager import CacheManager
 from patterns.llm.llm_facade import create_llm_facade
-from sqlalchemy import text
+from utils.ascii_art import ASCIIArt
 
 logger = logging.getLogger(__name__)
 
@@ -122,9 +123,7 @@ class ComprehensiveTechnicalAnalyzer:
         self.data_fetcher = MarketDataFetcher(config)
         self.ollama = create_llm_facade(config)  # Use pattern-based LLM facade
         self.cache_manager = CacheManager(config)  # Use cache manager with config
-        self.indicators_dao = get_technical_indicators_dao()
-        self.analysis_dao = get_stock_analysis_dao()
-        self.db_manager = DatabaseManager()
+        # Note: Technical indicators use parquet-only storage, no database
         
         # Create price cache directory
         self.price_cache_dir = Path(config.data_dir) / "price_cache"
@@ -173,11 +172,15 @@ class ComprehensiveTechnicalAnalyzer:
                             df = pd.DataFrame(cached_data['data'])
                             df.index = pd.to_datetime(df.index)
                         
-                        # Calculate indicators from cached data
-                        indicators = self._calculate_comprehensive_indicators(df, symbol)
+                        # Use cached enhanced data with pre-calculated indicators  
+                        # Extract indicators and generate CSV from cached enhanced data
+                        calculator = get_technical_calculator()
+                        recent_data = calculator.extract_recent_data_for_llm(df, days=30)
+                        csv_data = self._generate_csv_for_llm_from_enhanced(recent_data)
+                        indicators = self._create_indicators_from_enhanced_df(df, symbol)
+                        
                         if indicators:
                             # Perform AI analysis
-                            csv_data = self._generate_csv_for_llm(df, indicators)
                             stock_info = self.data_fetcher.get_stock_info(symbol)
                             ai_analysis = self._perform_comprehensive_ai_analysis(symbol, csv_data, indicators, stock_info)
                             
@@ -208,22 +211,29 @@ class ComprehensiveTechnicalAnalyzer:
             symbol_logger.info("Fetching fresh market data from Yahoo Finance")
             df = self.data_fetcher.get_stock_data(symbol, days)
             if df.empty:
-                return self._create_default_analysis(symbol, "No market data available")
+                raise RuntimeError(f"No market data available for {symbol}")
             
-            # Calculate all technical indicators
-            indicators = self._calculate_comprehensive_indicators(df, symbol)
+            # Calculate all technical indicators using centralized calculator
+            symbol_logger.info(f"Calculating comprehensive technical indicators for {symbol}")
+            calculator = get_technical_calculator()
+            enhanced_df = calculator.calculate_all_indicators(df, symbol)
+            
+            # Create TechnicalAnalysisData object from enhanced DataFrame
+            indicators = self._create_indicators_from_enhanced_df(enhanced_df, symbol)
             if not indicators:
-                return self._create_default_analysis(symbol, "Failed to calculate indicators")
+                raise RuntimeError(f"Failed to create indicators object for {symbol}")
             
-            # Save enhanced price data with indicators to parquet
-            enhanced_df = self._create_enhanced_dataframe(df, indicators)
+            # Save enhanced data with all indicators to parquet FIRST
+            symbol_logger.info(f"Caching enhanced data with indicators to parquet for {symbol}")
             self._save_to_parquet(symbol, enhanced_df, days)
             
             # Get stock info
             stock_info = self.data_fetcher.get_stock_info(symbol)
             
-            # Generate CSV data for LLM
-            csv_data = self._generate_csv_for_llm(enhanced_df, indicators)
+            # Generate CSV data for LLM using last 30 days from enhanced data
+            calculator = get_technical_calculator()
+            recent_data = calculator.extract_recent_data_for_llm(enhanced_df, days=30)
+            csv_data = self._generate_csv_for_llm_from_enhanced(recent_data)
             
             # Perform AI analysis
             ai_analysis = self._perform_comprehensive_ai_analysis(symbol, csv_data, indicators, stock_info)
@@ -266,543 +276,174 @@ class ComprehensiveTechnicalAnalyzer:
         except Exception as e:
             symbol_logger.error(f"Technical analysis failed: {str(e)}")
             logger.error(f"Error in comprehensive technical analysis for {symbol}: {e}")
-            return self._create_default_analysis(symbol, f"Analysis error: {str(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            raise RuntimeError(f"Technical analysis failed for {symbol}: {str(e)}")
     
-    def _calculate_comprehensive_indicators(self, df: pd.DataFrame, symbol: str) -> Optional[TechnicalAnalysisData]:
-        """Calculate all technical indicators comprehensively"""
+    def _create_indicators_from_enhanced_df(self, enhanced_df: pd.DataFrame, symbol: str) -> TechnicalAnalysisData:
+        """
+        Create TechnicalAnalysisData object from enhanced DataFrame with pre-calculated indicators
+        Extracts the latest values from all calculated indicators
+        """
         try:
-            if len(df) < 50:
-                logger.warning(f"Insufficient data for comprehensive analysis: {len(df)} days")
+            if enhanced_df.empty:
                 return None
             
-            # Basic price data
-            current_price = safe_float_convert(df['Close'].iloc[-1])
-            volume = safe_float_convert(df['Volume'].iloc[-1])
-            
-            # Calculate all moving averages
-            periods = [5, 10, 12, 20, 26, 50, 100, 200]
-            for period in periods:
-                if len(df) >= period:
-                    df[f'SMA_{period}'] = df['Close'].rolling(window=period).mean()
-                    df[f'EMA_{period}'] = df['Close'].ewm(span=period).mean()
-            
-            # RSI with multiple periods
-            df['RSI_9'] = self._calculate_rsi(df['Close'], 9)
-            df['RSI_14'] = self._calculate_rsi(df['Close'], 14)
-            df['RSI_21'] = self._calculate_rsi(df['Close'], 21)
-            
-            # Stochastic Oscillator
-            df['Stoch_K'], df['Stoch_D'] = self._calculate_stochastic(df)
-            
-            # Williams %R
-            df['Williams_R'] = self._calculate_williams_r(df)
-            
-            # Rate of Change
-            df['ROC_10'] = self._calculate_roc(df['Close'], 10)
-            df['ROC_20'] = self._calculate_roc(df['Close'], 20)
-            
-            # MACD
-            if len(df) >= 26:
-                df['MACD'] = df['EMA_12'] - df['EMA_26']
-                df['MACD_Signal'] = df['MACD'].ewm(span=9).mean()
-                df['MACD_Histogram'] = df['MACD'] - df['MACD_Signal']
-            
-            # Bollinger Bands
-            df = self._calculate_bollinger_bands(df)
-            
-            # Volume Indicators
-            df['Volume_SMA_20'] = df['Volume'].rolling(window=20).mean()
-            df['Volume_Ratio'] = df['Volume'] / df['Volume_SMA_20']
-            df['OBV'] = self._calculate_obv(df)
-            df['VPT'] = self._calculate_volume_price_trend(df)
-            df['AD'] = self._calculate_accumulation_distribution(df)
-            df['MFI'] = self._calculate_money_flow_index(df)
-            
-            # Volume Weighted Average Price (VWAP)
-            df['VWAP'] = self._calculate_vwap(df)
-            
-            # Average True Range
-            df['ATR_14'] = self._calculate_atr(df, 14)
-            
-            # Volatility
-            df['Returns'] = df['Close'].pct_change()
-            volatility_20d = safe_float_convert(df['Returns'].rolling(window=20).std() * np.sqrt(252) * 100, 20.0)
-            
-            # Price changes
-            price_changes = self._calculate_price_changes(df)
-            
-            # Support and Resistance
-            support_resistance = self._calculate_support_resistance_levels(df)
-            
-            # Volume-based Support/Resistance
-            volume_levels = self._calculate_volume_based_levels(df)
-            
-            # Fibonacci levels
-            fibonacci_levels = self._calculate_fibonacci_levels(df)
-            
             # Get latest values
-            latest = df.iloc[-1]
+            latest = enhanced_df.iloc[-1]
             
-            # Create comprehensive indicators object
+            # Create moving averages dict
+            moving_averages = {}
+            for period in [5, 10, 12, 20, 26, 50, 100, 200]:
+                if f'SMA_{period}' in enhanced_df.columns:
+                    moving_averages[f'sma_{period}'] = float(latest[f'SMA_{period}']) if not pd.isna(latest[f'SMA_{period}']) else 0.0
+                if f'EMA_{period}' in enhanced_df.columns:
+                    moving_averages[f'ema_{period}'] = float(latest[f'EMA_{period}']) if not pd.isna(latest[f'EMA_{period}']) else 0.0
+            
+            # Create momentum indicators dict
+            momentum_indicators = {}
+            for period in [9, 14, 21]:
+                if f'RSI_{period}' in enhanced_df.columns:
+                    momentum_indicators[f'rsi_{period}'] = float(latest[f'RSI_{period}']) if not pd.isna(latest[f'RSI_{period}']) else 0.0
+            
+            momentum_indicators.update({
+                'macd': float(latest['MACD']) if 'MACD' in enhanced_df.columns and not pd.isna(latest['MACD']) else 0.0,
+                'macd_signal': float(latest['MACD_Signal']) if 'MACD_Signal' in enhanced_df.columns and not pd.isna(latest['MACD_Signal']) else 0.0,
+                'macd_histogram': float(latest['MACD_Histogram']) if 'MACD_Histogram' in enhanced_df.columns and not pd.isna(latest['MACD_Histogram']) else 0.0,
+                'stoch_k': float(latest['Stoch_K']) if 'Stoch_K' in enhanced_df.columns and not pd.isna(latest['Stoch_K']) else 0.0,
+                'stoch_d': float(latest['Stoch_D']) if 'Stoch_D' in enhanced_df.columns and not pd.isna(latest['Stoch_D']) else 0.0,
+                'williams_r': float(latest['Williams_R']) if 'Williams_R' in enhanced_df.columns and not pd.isna(latest['Williams_R']) else 0.0,
+                'mfi_14': float(latest['MFI_14']) if 'MFI_14' in enhanced_df.columns and not pd.isna(latest['MFI_14']) else 0.0,
+            })
+            
+            # Create volatility indicators dict
+            volatility_indicators = {
+                'bb_upper': float(latest['BB_Upper']) if 'BB_Upper' in enhanced_df.columns and not pd.isna(latest['BB_Upper']) else 0.0,
+                'bb_middle': float(latest['BB_Middle']) if 'BB_Middle' in enhanced_df.columns and not pd.isna(latest['BB_Middle']) else 0.0,
+                'bb_lower': float(latest['BB_Lower']) if 'BB_Lower' in enhanced_df.columns and not pd.isna(latest['BB_Lower']) else 0.0,
+                'bb_width': float(latest['BB_Width']) if 'BB_Width' in enhanced_df.columns and not pd.isna(latest['BB_Width']) else 0.0,
+                'atr_14': float(latest['ATR_14']) if 'ATR_14' in enhanced_df.columns and not pd.isna(latest['ATR_14']) else 0.0,
+                'volatility_20': float(latest['Volatility_20']) if 'Volatility_20' in enhanced_df.columns and not pd.isna(latest['Volatility_20']) else 0.0,
+                # Add Fibonacci levels
+                'fib_0': float(latest['Fib_0']) if 'Fib_0' in enhanced_df.columns and not pd.isna(latest['Fib_0']) else 0.0,
+                'fib_23_6': float(latest['Fib_23_6']) if 'Fib_23_6' in enhanced_df.columns and not pd.isna(latest['Fib_23_6']) else 0.0,
+                'fib_38_2': float(latest['Fib_38_2']) if 'Fib_38_2' in enhanced_df.columns and not pd.isna(latest['Fib_38_2']) else 0.0,
+                'fib_50_0': float(latest['Fib_50_0']) if 'Fib_50_0' in enhanced_df.columns and not pd.isna(latest['Fib_50_0']) else 0.0,
+                'fib_61_8': float(latest['Fib_61_8']) if 'Fib_61_8' in enhanced_df.columns and not pd.isna(latest['Fib_61_8']) else 0.0,
+                'fib_78_6': float(latest['Fib_78_6']) if 'Fib_78_6' in enhanced_df.columns and not pd.isna(latest['Fib_78_6']) else 0.0,
+                'fib_100': float(latest['Fib_100']) if 'Fib_100' in enhanced_df.columns and not pd.isna(latest['Fib_100']) else 0.0,
+                # Add pivot points
+                'pivot_point': float(latest['Pivot_Point']) if 'Pivot_Point' in enhanced_df.columns and not pd.isna(latest['Pivot_Point']) else 0.0,
+                'pivot_r1': float(latest['Pivot_R1']) if 'Pivot_R1' in enhanced_df.columns and not pd.isna(latest['Pivot_R1']) else 0.0,
+                'pivot_r2': float(latest['Pivot_R2']) if 'Pivot_R2' in enhanced_df.columns and not pd.isna(latest['Pivot_R2']) else 0.0,
+                'pivot_s1': float(latest['Pivot_S1']) if 'Pivot_S1' in enhanced_df.columns and not pd.isna(latest['Pivot_S1']) else 0.0,
+                'pivot_s2': float(latest['Pivot_S2']) if 'Pivot_S2' in enhanced_df.columns and not pd.isna(latest['Pivot_S2']) else 0.0,
+            }
+            
+            # Create volume indicators dict
+            volume_indicators = {
+                'volume': float(latest['Volume']) if not pd.isna(latest['Volume']) else 0.0,
+                'volume_sma_20': float(latest['Volume_SMA_20']) if 'Volume_SMA_20' in enhanced_df.columns and not pd.isna(latest['Volume_SMA_20']) else 0.0,
+                'volume_ratio': float(latest['Volume_Ratio']) if 'Volume_Ratio' in enhanced_df.columns and not pd.isna(latest['Volume_Ratio']) else 0.0,
+                'obv': float(latest['OBV']) if 'OBV' in enhanced_df.columns and not pd.isna(latest['OBV']) else 0.0,
+                'vpt': float(latest['VPT']) if 'VPT' in enhanced_df.columns and not pd.isna(latest['VPT']) else 0.0,
+                'ad': float(latest['AD']) if 'AD' in enhanced_df.columns and not pd.isna(latest['AD']) else 0.0,
+                'vwap': float(latest['VWAP']) if 'VWAP' in enhanced_df.columns and not pd.isna(latest['VWAP']) else 0.0,
+            }
+            
+            # Extract support and resistance levels
+            support_levels = []
+            resistance_levels = []
+            
+            if 'Support_1' in enhanced_df.columns:
+                support_levels.append(float(latest['Support_1']) if not pd.isna(latest['Support_1']) else 0.0)
+            if 'Support_2' in enhanced_df.columns:
+                support_levels.append(float(latest['Support_2']) if not pd.isna(latest['Support_2']) else 0.0)
+            if 'Resistance_1' in enhanced_df.columns:
+                resistance_levels.append(float(latest['Resistance_1']) if not pd.isna(latest['Resistance_1']) else 0.0)
+            if 'Resistance_2' in enhanced_df.columns:
+                resistance_levels.append(float(latest['Resistance_2']) if not pd.isna(latest['Resistance_2']) else 0.0)
+            
+            # Create TechnicalAnalysisData object
             indicators = TechnicalAnalysisData(
                 symbol=symbol,
                 period="365d",
-                current_price=current_price,
-                price_change=price_changes.get('price_change_1d', 0.0),
-                price_change_percent=price_changes.get('price_change_1d_pct', 0.0),
-                moving_averages={
-                    'SMA_5': safe_float_convert(latest.get('SMA_5'), current_price),
-                    'SMA_10': safe_float_convert(latest.get('SMA_10'), current_price),
-                    'SMA_20': safe_float_convert(latest.get('SMA_20'), current_price),
-                    'SMA_50': safe_float_convert(latest.get('SMA_50'), current_price),
-                    'SMA_100': safe_float_convert(latest.get('SMA_100'), current_price),
-                    'SMA_200': safe_float_convert(latest.get('SMA_200'), current_price),
-                    'EMA_5': safe_float_convert(latest.get('EMA_5'), current_price),
-                    'EMA_10': safe_float_convert(latest.get('EMA_10'), current_price),
-                    'EMA_12': safe_float_convert(latest.get('EMA_12'), current_price),
-                    'EMA_20': safe_float_convert(latest.get('EMA_20'), current_price),
-                    'EMA_26': safe_float_convert(latest.get('EMA_26'), current_price),
-                    'EMA_50': safe_float_convert(latest.get('EMA_50'), current_price),
-                    'EMA_100': safe_float_convert(latest.get('EMA_100'), current_price),
-                    'EMA_200': safe_float_convert(latest.get('EMA_200'), current_price),
-                },
-                momentum_indicators={
-                    'RSI_9': safe_float_convert(latest.get('RSI_9'), 50.0),
-                    'RSI_14': safe_float_convert(latest.get('RSI_14'), 50.0),
-                    'RSI_21': safe_float_convert(latest.get('RSI_21'), 50.0),
-                    'Stoch_K': safe_float_convert(latest.get('Stoch_K'), 50.0),
-                    'Stoch_D': safe_float_convert(latest.get('Stoch_D'), 50.0),
-                    'Williams_R': safe_float_convert(latest.get('Williams_R'), -50.0),
-                    'ROC_10': safe_float_convert(latest.get('ROC_10'), 0.0),
-                    'ROC_20': safe_float_convert(latest.get('ROC_20'), 0.0),
-                    'MACD': safe_float_convert(latest.get('MACD'), 0.0),
-                    'MACD_Signal': safe_float_convert(latest.get('MACD_Signal'), 0.0),
-                    'MACD_Histogram': safe_float_convert(latest.get('MACD_Histogram'), 0.0),
-                },
-                volatility_indicators={
-                    'BB_Upper': safe_float_convert(latest.get('BB_Upper'), current_price * 1.1),
-                    'BB_Middle': safe_float_convert(latest.get('BB_Middle'), current_price),
-                    'BB_Lower': safe_float_convert(latest.get('BB_Lower'), current_price * 0.9),
-                    'BB_Width': safe_float_convert(latest.get('BB_Width'), 0.2),
-                    'BB_Position': safe_float_convert(latest.get('BB_Position'), 0.5),
-                    'ATR_14': safe_float_convert(latest.get('ATR_14'), current_price * 0.02),
-                    'Volatility_20d': volatility_20d,
-                },
-                volume_indicators={
-                    'Volume': volume,
-                    'Volume_SMA_20': safe_float_convert(latest.get('Volume_SMA_20'), volume),
-                    'Volume_Ratio': safe_float_convert(volume / latest.get('Volume_SMA_20', volume) if latest.get('Volume_SMA_20', volume) != 0 else 1.0, 1.0),
-                    'OBV': safe_float_convert(latest.get('OBV'), 0.0),
-                    'VPT': safe_float_convert(latest.get('VPT'), 0.0),
-                    'AD': safe_float_convert(latest.get('AD'), 0.0),
-                    'MFI': safe_float_convert(latest.get('MFI'), 50.0),
-                },
-                support_levels=support_resistance.get('support_levels', []),
-                resistance_levels=support_resistance.get('resistance_levels', []),
-                metadata={
-                    'data_points': len(df),
-                    'analysis_timestamp': datetime.utcnow().isoformat(),
-                    'fibonacci_levels': fibonacci_levels,
-                    'volume_levels': volume_levels,
-                    'price_changes': price_changes
-                }
+                analysis_date=datetime.now(),
+                current_price=float(latest['Close']) if not pd.isna(latest['Close']) else 0.0,
+                price_change=float(latest['Price_Change_1D']) if 'Price_Change_1D' in enhanced_df.columns and not pd.isna(latest['Price_Change_1D']) else 0.0,
+                moving_averages=moving_averages,
+                momentum_indicators=momentum_indicators,
+                volatility_indicators=volatility_indicators,
+                volume_indicators=volume_indicators,
+                support_levels=support_levels,
+                resistance_levels=resistance_levels,
+                metadata={'data_points': len(enhanced_df), 'calculation_method': 'centralized_calculator'}
             )
             
-            logger.info(f"Successfully calculated comprehensive indicators for {symbol}")
             return indicators
             
         except Exception as e:
-            logger.error(f"Error calculating comprehensive indicators: {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            logger.error(f"Error creating indicators from enhanced DataFrame for {symbol}: {e}")
             return None
     
-    def _calculate_rsi(self, prices: pd.Series, period: int = 14) -> pd.Series:
-        """Calculate Relative Strength Index"""
+    def _generate_csv_for_llm_from_enhanced(self, recent_df: pd.DataFrame) -> str:
+        """
+        Generate CSV data for LLM from enhanced DataFrame with pre-calculated indicators
+        Uses the last 30 days of data with all indicators already calculated on full dataset
+        """
         try:
-            delta = prices.diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-            rs = gain / loss.replace(0, np.nan)
-            rsi = 100 - (100 / (1 + rs))
-            return rsi.fillna(50)
-        except Exception as e:
-            logger.error(f"Error calculating RSI: {e}")
-            return pd.Series([50] * len(prices), index=prices.index)
-    
-    def _calculate_stochastic(self, df: pd.DataFrame, k_period: int = 14, d_period: int = 3) -> Tuple[pd.Series, pd.Series]:
-        """Calculate Stochastic Oscillator"""
-        try:
-            lowest_low = df['Low'].rolling(window=k_period).min()
-            highest_high = df['High'].rolling(window=k_period).max()
-            # Replace zero denominators to avoid division by zero
-            denominator = (highest_high - lowest_low).replace(0, np.nan)
-            k_percent = 100 * ((df['Close'] - lowest_low) / denominator)
-            k_percent = k_percent.fillna(50)
-            d_percent = k_percent.rolling(window=d_period).mean().fillna(50)
-            return k_percent, d_percent
-        except Exception as e:
-            logger.error(f"Error calculating Stochastic: {e}")
-            return pd.Series([50] * len(df), index=df.index), pd.Series([50] * len(df), index=df.index)
-    
-    def _calculate_williams_r(self, df: pd.DataFrame, period: int = 14) -> pd.Series:
-        """Calculate Williams %R"""
-        try:
-            highest_high = df['High'].rolling(window=period).max()
-            lowest_low = df['Low'].rolling(window=period).min()
-            # Replace zero denominators to avoid division by zero
-            denominator = (highest_high - lowest_low).replace(0, np.nan)
-            williams_r = -100 * ((highest_high - df['Close']) / denominator)
-            return williams_r.fillna(-50)
-        except Exception as e:
-            logger.error(f"Error calculating Williams %R: {e}")
-            return pd.Series([-50] * len(df), index=df.index)
-    
-    def _calculate_roc(self, prices: pd.Series, period: int) -> pd.Series:
-        """Calculate Rate of Change"""
-        try:
-            roc = ((prices - prices.shift(period)) / prices.shift(period)) * 100
-            return roc.fillna(0)
-        except Exception as e:
-            logger.error(f"Error calculating ROC: {e}")
-            return pd.Series([0] * len(prices), index=prices.index)
-    
-    def _calculate_bollinger_bands(self, df: pd.DataFrame, period: int = 20, std_dev: int = 2) -> pd.DataFrame:
-        """Calculate Bollinger Bands with additional metrics"""
-        try:
-            df['BB_Middle'] = df['Close'].rolling(window=period).mean()
-            rolling_std = df['Close'].rolling(window=period).std()
-            df['BB_Upper'] = df['BB_Middle'] + (rolling_std * std_dev)
-            df['BB_Lower'] = df['BB_Middle'] - (rolling_std * std_dev)
-            
-            # Additional metrics
-            df['BB_Width'] = (df['BB_Upper'] - df['BB_Lower']) / df['BB_Middle']
-            df['BB_Position'] = (df['Close'] - df['BB_Lower']) / (df['BB_Upper'] - df['BB_Lower'])
-            
-            return df
-        except Exception as e:
-            logger.error(f"Error calculating Bollinger Bands: {e}")
-            return df
-    
-    def _calculate_obv(self, df: pd.DataFrame) -> pd.Series:
-        """Calculate On-Balance Volume"""
-        try:
-            obv = []
-            obv_value = 0
-            
-            for i in range(len(df)):
-                if i == 0:
-                    obv.append(df['Volume'].iloc[i])
-                    obv_value = df['Volume'].iloc[i]
-                else:
-                    if df['Close'].iloc[i] > df['Close'].iloc[i-1]:
-                        obv_value += df['Volume'].iloc[i]
-                    elif df['Close'].iloc[i] < df['Close'].iloc[i-1]:
-                        obv_value -= df['Volume'].iloc[i]
-                    obv.append(obv_value)
-            
-            return pd.Series(obv, index=df.index)
-        except Exception as e:
-            logger.error(f"Error calculating OBV: {e}")
-            return pd.Series([0] * len(df), index=df.index)
-    
-    def _calculate_volume_price_trend(self, df: pd.DataFrame) -> pd.Series:
-        """Calculate Volume Price Trend"""
-        try:
-            price_change = df['Close'].pct_change()
-            vpt = (price_change * df['Volume']).cumsum()
-            return vpt.fillna(0)
-        except Exception as e:
-            logger.error(f"Error calculating VPT: {e}")
-            return pd.Series([0] * len(df), index=df.index)
-    
-    def _calculate_accumulation_distribution(self, df: pd.DataFrame) -> pd.Series:
-        """Calculate Accumulation/Distribution Line"""
-        try:
-            clv = ((df['Close'] - df['Low']) - (df['High'] - df['Close'])) / (df['High'] - df['Low'])
-            clv = clv.fillna(0)
-            ad = (clv * df['Volume']).cumsum()
-            return ad
-        except Exception as e:
-            logger.error(f"Error calculating A/D: {e}")
-            return pd.Series([0] * len(df), index=df.index)
-    
-    def _calculate_money_flow_index(self, df: pd.DataFrame, period: int = 14) -> pd.Series:
-        """Calculate Money Flow Index"""
-        try:
-            typical_price = (df['High'] + df['Low'] + df['Close']) / 3
-            raw_money_flow = typical_price * df['Volume']
-            
-            positive_flow = []
-            negative_flow = []
-            
-            for i in range(1, len(df)):
-                if typical_price.iloc[i] > typical_price.iloc[i-1]:
-                    positive_flow.append(raw_money_flow.iloc[i])
-                    negative_flow.append(0)
-                elif typical_price.iloc[i] < typical_price.iloc[i-1]:
-                    positive_flow.append(0)
-                    negative_flow.append(raw_money_flow.iloc[i])
-                else:
-                    positive_flow.append(0)
-                    negative_flow.append(0)
-            
-            positive_flow = [0] + positive_flow
-            negative_flow = [0] + negative_flow
-            
-            positive_mf = pd.Series(positive_flow, index=df.index).rolling(window=period).sum()
-            negative_mf = pd.Series(negative_flow, index=df.index).rolling(window=period).sum()
-            
-            mfi = 100 - (100 / (1 + (positive_mf / negative_mf.replace(0, np.nan))))
-            return mfi.fillna(50)
-        except Exception as e:
-            logger.error(f"Error calculating MFI: {e}")
-            return pd.Series([50] * len(df), index=df.index)
-    
-    def _calculate_atr(self, df: pd.DataFrame, period: int = 14) -> pd.Series:
-        """Calculate Average True Range"""
-        try:
-            high_low = df['High'] - df['Low']
-            high_close = np.abs(df['High'] - df['Close'].shift())
-            low_close = np.abs(df['Low'] - df['Close'].shift())
-            
-            true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-            atr = true_range.rolling(window=period).mean()
-            return atr.fillna(df['Close'] * 0.02)
-        except Exception as e:
-            logger.error(f"Error calculating ATR: {e}")
-            return pd.Series([0] * len(df), index=df.index)
-    
-    def _calculate_price_changes(self, df: pd.DataFrame) -> Dict:
-        """Calculate price changes over various periods"""
-        try:
-            current_price = df['Close'].iloc[-1]
-            
-            changes = {}
-            periods = {
-                'price_change_1d': 1,
-                'price_change_1w': 5,
-                'price_change_1m': 22,
-                'price_change_3m': 65,
-                'price_change_6m': 130,
-                'price_change_1y': 252
-            }
-            
-            for key, period in periods.items():
-                if len(df) > period:
-                    past_price = df['Close'].iloc[-(period + 1)]
-                    change = ((current_price - past_price) / past_price) * 100 if past_price != 0 else 0.0
-                    changes[key] = safe_float_convert(change, 0.0)
-                else:
-                    changes[key] = 0.0
-            
-            return changes
-        except Exception as e:
-            logger.error(f"Error calculating price changes: {e}")
-            return {
-                'price_change_1d': 0.0, 'price_change_1w': 0.0, 'price_change_1m': 0.0,
-                'price_change_3m': 0.0, 'price_change_6m': 0.0, 'price_change_1y': 0.0
-            }
-    
-    def _calculate_support_resistance_levels(self, df: pd.DataFrame) -> Dict:
-        """Calculate traditional support and resistance levels"""
-        try:
-            # Use recent data for more relevant levels
-            recent_data = df.tail(50)
-            
-            # Find local minima and maxima
-            lows = recent_data['Low']
-            highs = recent_data['High']
-            
-            # Support levels (significant lows)
-            support_candidates = []
-            for i in range(2, len(lows) - 2):
-                if (lows.iloc[i] < lows.iloc[i-1] and lows.iloc[i] < lows.iloc[i-2] and 
-                    lows.iloc[i] < lows.iloc[i+1] and lows.iloc[i] < lows.iloc[i+2]):
-                    support_candidates.append(lows.iloc[i])
-            
-            # Resistance levels (significant highs)
-            resistance_candidates = []
-            for i in range(2, len(highs) - 2):
-                if (highs.iloc[i] > highs.iloc[i-1] and highs.iloc[i] > highs.iloc[i-2] and 
-                    highs.iloc[i] > highs.iloc[i+1] and highs.iloc[i] > highs.iloc[i+2]):
-                    resistance_candidates.append(highs.iloc[i])
-            
-            # Sort and get top levels
-            support_candidates.sort(reverse=True)  # Highest support first
-            resistance_candidates.sort()  # Lowest resistance first
-            
-            # Pivot point calculation
-            last_high = recent_data['High'].iloc[-1]
-            last_low = recent_data['Low'].iloc[-1]
-            last_close = recent_data['Close'].iloc[-1]
-            pivot_point = (last_high + last_low + last_close) / 3
-            
-            return {
-                'support_level_1': safe_float_convert(support_candidates[0] if support_candidates else recent_data['Low'].min()),
-                'support_level_2': safe_float_convert(support_candidates[1] if len(support_candidates) > 1 else recent_data['Low'].min()),
-                'resistance_level_1': safe_float_convert(resistance_candidates[0] if resistance_candidates else recent_data['High'].max()),
-                'resistance_level_2': safe_float_convert(resistance_candidates[1] if len(resistance_candidates) > 1 else recent_data['High'].max()),
-                'pivot_point': safe_float_convert(pivot_point)
-            }
-        except Exception as e:
-            logger.error(f"Error calculating support/resistance: {e}")
-            current_price = df['Close'].iloc[-1]
-            return {
-                'support_level_1': current_price * 0.95,
-                'support_level_2': current_price * 0.90,
-                'resistance_level_1': current_price * 1.05,
-                'resistance_level_2': current_price * 1.10,
-                'pivot_point': current_price
-            }
-    
-    def _calculate_volume_based_levels(self, df: pd.DataFrame) -> Dict:
-        """Calculate volume-weighted support and resistance levels"""
-        try:
-            # Volume-weighted average price over recent period
-            recent_data = df.tail(50)
-            vwap = (recent_data['Close'] * recent_data['Volume']).sum() / recent_data['Volume'].sum()
-            
-            # Find high-volume price areas
-            price_volume_map = {}
-            for _, row in recent_data.iterrows():
-                price_bucket = round(row['Close'], 2)
-                if price_bucket in price_volume_map:
-                    price_volume_map[price_bucket] += row['Volume']
-                else:
-                    price_volume_map[price_bucket] = row['Volume']
-            
-            # Sort by volume to find high-volume areas
-            sorted_pv = sorted(price_volume_map.items(), key=lambda x: x[1], reverse=True)
-            
-            current_price = df['Close'].iloc[-1]
-            
-            # Find volume support (high volume below current price)
-            volume_support = current_price * 0.95
-            for price, volume in sorted_pv:
-                if price < current_price:
-                    volume_support = price
-                    break
-            
-            # Find volume resistance (high volume above current price)
-            volume_resistance = current_price * 1.05
-            for price, volume in sorted_pv:
-                if price > current_price:
-                    volume_resistance = price
-                    break
-            
-            return {
-                'volume_support': safe_float_convert(volume_support),
-                'volume_resistance': safe_float_convert(volume_resistance),
-                'volume_weighted_price': safe_float_convert(vwap)
-            }
-        except Exception as e:
-            logger.error(f"Error calculating volume-based levels: {e}")
-            current_price = df['Close'].iloc[-1]
-            return {
-                'volume_support': current_price * 0.95,
-                'volume_resistance': current_price * 1.05,
-                'volume_weighted_price': current_price
-            }
-    
-    def _calculate_fibonacci_levels(self, df: pd.DataFrame) -> Dict:
-        """Calculate Fibonacci retracement levels"""
-        try:
-            # Use recent swing high and low
-            recent_data = df.tail(100)
-            swing_high = recent_data['High'].max()
-            swing_low = recent_data['Low'].min()
-            
-            diff = swing_high - swing_low
-            
-            return {
-                'fib_23_6': safe_float_convert(swing_high - (diff * 0.236)),
-                'fib_38_2': safe_float_convert(swing_high - (diff * 0.382)),
-                'fib_50_0': safe_float_convert(swing_high - (diff * 0.5)),
-                'fib_61_8': safe_float_convert(swing_high - (diff * 0.618)),
-                'fib_78_6': safe_float_convert(swing_high - (diff * 0.786))
-            }
-        except Exception as e:
-            logger.error(f"Error calculating Fibonacci levels: {e}")
-            current_price = df['Close'].iloc[-1]
-            return {
-                'fib_23_6': current_price * 0.976,
-                'fib_38_2': current_price * 0.962,
-                'fib_50_0': current_price * 0.95,
-                'fib_61_8': current_price * 0.938,
-                'fib_78_6': current_price * 0.921
-            }
-    
-    def _generate_csv_for_llm(self, df: pd.DataFrame, indicators: TechnicalAnalysisData) -> str:
-        """Generate comprehensive CSV data for LLM analysis"""
-        try:
-            # Take recent data (last 60 days) for LLM analysis
-            recent_df = df.tail(60).copy()
-            
             # Create CSV content
             csv_buffer = io.StringIO()
             writer = csv.writer(csv_buffer)
             
-            # Write header
+            # Write header - all indicators are already calculated
             header = [
                 'Date', 'Open', 'High', 'Low', 'Close', 'Volume',
-                'SMA_20', 'SMA_50', 'EMA_12', 'EMA_26', 'RSI_14',
-                'MACD', 'MACD_Signal', 'BB_Upper', 'BB_Lower', 'OBV',
-                'Volume_Ratio', 'Price_Change_1D', 'ATR_14'
+                'SMA_20', 'SMA_50', 'SMA_200', 'EMA_12', 'EMA_26', 'RSI_14',
+                'MACD', 'MACD_Signal', 'BB_Upper', 'BB_Lower', 'ATR_14',
+                'Volume_Ratio', 'Price_Change_1D', 'Pivot_Point',
+                'Fib_23_6', 'Fib_38_2', 'Fib_50_0', 'Fib_61_8', 'Fib_78_6',
+                'Support_1', 'Resistance_1'
             ]
             writer.writerow(header)
             
-            # Calculate indicators for recent data
-            recent_df['SMA_20'] = recent_df['Close'].rolling(20).mean()
-            recent_df['SMA_50'] = recent_df['Close'].rolling(50).mean()
-            recent_df['EMA_12'] = recent_df['Close'].ewm(span=12).mean()
-            recent_df['EMA_26'] = recent_df['Close'].ewm(span=26).mean()
-            recent_df['RSI_14'] = self._calculate_rsi(recent_df['Close'], 14)
-            recent_df['MACD'] = recent_df['EMA_12'] - recent_df['EMA_26']
-            recent_df['MACD_Signal'] = recent_df['MACD'].ewm(span=9).mean()
-            
-            # Bollinger Bands
-            bb_middle = recent_df['Close'].rolling(20).mean()
-            bb_std = recent_df['Close'].rolling(20).std()
-            recent_df['BB_Upper'] = bb_middle + (bb_std * 2)
-            recent_df['BB_Lower'] = bb_middle - (bb_std * 2)
-            
-            # Volume and ATR
-            recent_df['OBV'] = self._calculate_obv(recent_df)
-            recent_df['Volume_SMA_20'] = recent_df['Volume'].rolling(20).mean()
-            recent_df['Volume_Ratio'] = recent_df['Volume'] / recent_df['Volume_SMA_20']
-            recent_df['Price_Change_1D'] = recent_df['Close'].pct_change() * 100
-            recent_df['ATR_14'] = self._calculate_atr(recent_df, 14)
-            
-            # Write data rows
+            # Write data rows using pre-calculated indicators
             for _, row in recent_df.iterrows():
                 data_row = [
                     row.name.strftime('%Y-%m-%d'),
-                    f"{row['Open']:.2f}",
-                    f"{row['High']:.2f}",
-                    f"{row['Low']:.2f}",
-                    f"{row['Close']:.2f}",
-                    f"{row['Volume']:,.0f}",
-                    f"{safe_float_convert(row['SMA_20']):.2f}",
-                    f"{safe_float_convert(row['SMA_50']):.2f}",
-                    f"{safe_float_convert(row['EMA_12']):.2f}",
-                    f"{safe_float_convert(row['EMA_26']):.2f}",
-                    f"{safe_float_convert(row['RSI_14']):.1f}",
-                    f"{safe_float_convert(row['MACD']):.3f}",
-                    f"{safe_float_convert(row['MACD_Signal']):.3f}",
-                    f"{safe_float_convert(row['BB_Upper']):.2f}",
-                    f"{safe_float_convert(row['BB_Lower']):.2f}",
-                    f"{safe_float_convert(row['OBV']):,.0f}",
-                    f"{safe_float_convert(row['Volume_Ratio']):.2f}",
-                    f"{safe_float_convert(row['Price_Change_1D']):.2f}",
-                    f"{safe_float_convert(row['ATR_14']):.2f}"
+                    f"{safe_float_convert(row['Open']):.2f}",
+                    f"{safe_float_convert(row['High']):.2f}",
+                    f"{safe_float_convert(row['Low']):.2f}",
+                    f"{safe_float_convert(row['Close']):.2f}",
+                    f"{safe_float_convert(row['Volume']):,.0f}",
+                    f"{safe_float_convert(row.get('SMA_20', 0)):.2f}",
+                    f"{safe_float_convert(row.get('SMA_50', 0)):.2f}",
+                    f"{safe_float_convert(row.get('SMA_200', 0)):.2f}",
+                    f"{safe_float_convert(row.get('EMA_12', 0)):.2f}",
+                    f"{safe_float_convert(row.get('EMA_26', 0)):.2f}",
+                    f"{safe_float_convert(row.get('RSI_14', 0)):.1f}",
+                    f"{safe_float_convert(row.get('MACD', 0)):.3f}",
+                    f"{safe_float_convert(row.get('MACD_Signal', 0)):.3f}",
+                    f"{safe_float_convert(row.get('BB_Upper', 0)):.2f}",
+                    f"{safe_float_convert(row.get('BB_Lower', 0)):.2f}",
+                    f"{safe_float_convert(row.get('ATR_14', 0)):.2f}",
+                    f"{safe_float_convert(row.get('Volume_Ratio', 0)):.2f}",
+                    f"{safe_float_convert(row.get('Price_Change_1D', 0)):.2f}",
+                    f"{safe_float_convert(row.get('Pivot_Point', 0)):.2f}",
+                    f"{safe_float_convert(row.get('Fib_23_6', 0)):.2f}",
+                    f"{safe_float_convert(row.get('Fib_38_2', 0)):.2f}",
+                    f"{safe_float_convert(row.get('Fib_50_0', 0)):.2f}",
+                    f"{safe_float_convert(row.get('Fib_61_8', 0)):.2f}",
+                    f"{safe_float_convert(row.get('Fib_78_6', 0)):.2f}",
+                    f"{safe_float_convert(row.get('Support_1', 0)):.2f}",
+                    f"{safe_float_convert(row.get('Resistance_1', 0)):.2f}"
                 ]
                 writer.writerow(data_row)
             
             return csv_buffer.getvalue()
             
         except Exception as e:
-            logger.error(f"Error generating CSV for LLM: {e}")
+            logger.error(f"Error generating CSV from enhanced DataFrame: {e}")
             return "Date,Open,High,Low,Close,Volume\nError generating CSV data"
     
     def _perform_comprehensive_ai_analysis(self, symbol: str, csv_data: str, indicators: TechnicalAnalysisData, stock_info: Dict) -> Dict:
@@ -815,49 +456,57 @@ class ComprehensiveTechnicalAnalyzer:
         prompt_manager = get_prompt_manager()
         
         # Prepare indicators summary
-        indicators_summary = f"""Current Price: ${indicators.current_price:.2f}
+        # Get values from dictionaries with defaults
+        ma = indicators.moving_averages
+        mom = indicators.momentum_indicators
+        vol = indicators.volatility_indicators
+        volume = indicators.volume_indicators
+        
+        indicators_summary = f"""Current Price: ${indicators.current_price or 0:.2f}
 
 Moving Averages:
-- SMA 20: ${indicators.sma_20:.2f} | SMA 50: ${indicators.sma_50:.2f} | SMA 200: ${indicators.sma_200:.2f}
-- EMA 12: ${indicators.ema_12:.2f} | EMA 26: ${indicators.ema_26:.2f} | EMA 50: ${indicators.ema_50:.2f}
+- SMA 20: ${ma.get('sma_20', 0):.2f} | SMA 50: ${ma.get('sma_50', 0):.2f} | SMA 200: ${ma.get('sma_200', 0):.2f}
+- EMA 12: ${ma.get('ema_12', 0):.2f} | EMA 26: ${ma.get('ema_26', 0):.2f} | EMA 50: ${ma.get('ema_50', 0):.2f}
 
 Momentum Indicators:
-- RSI (14): {indicators.rsi_14:.1f} | Stochastic %K: {indicators.stoch_k:.1f} | Williams %R: {indicators.williams_r:.1f}
-- ROC (10): {indicators.roc_10:.2f}% | ROC (20): {indicators.roc_20:.2f}%
+- RSI (14): {mom.get('rsi_14', 0):.1f} | Stochastic %K: {mom.get('stoch_k', 0):.1f} | Williams %R: {mom.get('williams_r', 0):.1f}
+- ROC (10): {mom.get('roc_10', 0):.2f}% | ROC (20): {mom.get('roc_20', 0):.2f}%
 
 MACD Analysis:
-- MACD: {indicators.macd:.4f} | Signal: {indicators.macd_signal:.4f} | Histogram: {indicators.macd_histogram:.4f}
+- MACD: {mom.get('macd', 0):.4f} | Signal: {mom.get('macd_signal', 0):.4f} | Histogram: {mom.get('macd_histogram', 0):.4f}
 
 Bollinger Bands:
-- Upper: ${indicators.bb_upper:.2f} | Lower: ${indicators.bb_lower:.2f} | Position: {indicators.bb_position:.2f}
-- Width: {indicators.bb_width:.4f}
+- Upper: ${vol.get('bb_upper', 0):.2f} | Lower: ${vol.get('bb_lower', 0):.2f} | Position: {vol.get('bb_position', 0):.2f}
+- Width: {vol.get('bb_width', 0):.4f}
 
 Volume Analysis:
-- Current Volume: {indicators.volume:,.0f} | 20-Day Avg: {indicators.volume_sma_20:,.0f}
-- Volume Ratio: {indicators.volume_ratio:.2f}
-- OBV: {indicators.obv:,.0f} | Money Flow Index: {indicators.money_flow_index:.1f}
+- Current Volume: {volume.get('volume', 0):,.0f} | 20-Day Avg: {volume.get('volume_sma_20', 0):,.0f}
+- Volume Ratio: {volume.get('volume_ratio', 0):.2f}
+- OBV: {volume.get('obv', 0):,.0f} | Money Flow Index: {mom.get('mfi_14', 0):.1f}
 
 Support & Resistance:
-- Traditional Support: ${indicators.support_level_1:.2f} / ${indicators.support_level_2:.2f}
-- Traditional Resistance: ${indicators.resistance_level_1:.2f} / ${indicators.resistance_level_2:.2f}
-- Volume Support: ${indicators.volume_support:.2f} | Volume Resistance: ${indicators.volume_resistance:.2f}
-- VWAP: ${indicators.volume_weighted_price:.2f} | Pivot Point: ${indicators.pivot_point:.2f}
+- Traditional Support: ${indicators.support_levels[0] if indicators.support_levels else 0:.2f} / ${indicators.support_levels[1] if len(indicators.support_levels) > 1 else 0:.2f}
+- Traditional Resistance: ${indicators.resistance_levels[0] if indicators.resistance_levels else 0:.2f} / ${indicators.resistance_levels[1] if len(indicators.resistance_levels) > 1 else 0:.2f}
+- Volume Support: ${volume.get('VOLUME_SUPPORT', 0):.2f} | Volume Resistance: ${volume.get('VOLUME_RESISTANCE', 0):.2f}
+- VWAP: ${volume.get('vwap', 0):.2f} | Pivot Point: ${vol.get('pivot_point', 0):.2f}
 
 Fibonacci Levels:
-- 23.6%: ${indicators.fib_23_6:.2f} | 38.2%: ${indicators.fib_38_2:.2f} | 50.0%: ${indicators.fib_50_0:.2f}
-- 61.8%: ${indicators.fib_61_8:.2f} | 78.6%: ${indicators.fib_78_6:.2f}
+- 23.6%: ${vol.get('fib_23_6', 0):.2f} | 38.2%: ${vol.get('fib_38_2', 0):.2f} | 50.0%: ${vol.get('fib_50_0', 0):.2f}
+- 61.8%: ${vol.get('fib_61_8', 0):.2f} | 78.6%: ${vol.get('fib_78_6', 0):.2f}
+- 52W High: ${vol.get('fib_0', 0):.2f} | 52W Low: ${vol.get('fib_100', 0):.2f}
 
 Volatility:
-- ATR (14): ${indicators.atr_14:.2f} | 20-Day Volatility: {indicators.volatility_20d:.1f}%
+- ATR (14): ${vol.get('atr_14', 0):.2f} | 20-Day Volatility: {vol.get('volatility_20', 0):.1f}%
 
 Price Performance:
-- 1D: {indicators.price_change_1d:.2f}% | 1W: {indicators.price_change_1w:.2f}% | 1M: {indicators.price_change_1m:.2f}%
-- 3M: {indicators.price_change_3m:.2f}% | 6M: {indicators.price_change_6m:.2f}% | 1Y: {indicators.price_change_1y:.2f}%"""
+- 1D: {indicators.price_change_percent or 0:.2f}% | 1W: {ma.get('PRICE_CHANGE_1W', 0):.2f}% | 1M: {ma.get('PRICE_CHANGE_1M', 0):.2f}%
+- 3M: {indicators.metadata.get('price_changes', {}).get('price_change_3m', 0):.2f}% | 6M: {indicators.metadata.get('price_changes', {}).get('price_change_6m', 0):.2f}% | 1Y: {indicators.metadata.get('price_changes', {}).get('price_change_1y', 0):.2f}%"""
         
+        # Use standard prompt manager
         analysis_prompt = prompt_manager.render_technical_analysis_prompt(
             symbol=symbol,
             analysis_date=datetime.now().strftime('%Y-%m-%d'),
-            data_points=indicators.data_points,
+            data_points=indicators.metadata.get('data_points', 0),
             current_price=indicators.current_price,
             csv_data=csv_data,
             indicators_summary=indicators_summary,
@@ -883,20 +532,42 @@ Price Performance:
             )
             
             # Extract response for compatibility with existing code
-            ai_response = technical_result.get('raw_response', '')
+            # The facade returns structured data, but we need the raw response content
+            if 'error' in technical_result:
+                # If there's an error, use the raw_response if available
+                ai_response = technical_result.get('raw_response', '')
+            else:
+                # For successful responses, the facade returns parsed JSON
+                # Convert it back to JSON string for compatibility with existing parsing logic
+                import json
+                ai_response = json.dumps(technical_result, ensure_ascii=False)
             
             # Calculate processing time
             processing_time_ms = int((time.time() - start_time) * 1000)
             
-            # Parse JSON response
-            analysis_result = prompt_manager.validate_json_response(ai_response)
-            analysis_result['raw_response'] = ai_response
+            # Parse JSON response with metadata
+            technical_metadata = {
+                'model': 'llama3.1:8b-instruct-q8_0',  # Default technical analysis model
+                'processing_time_ms': processing_time_ms,
+                'symbol': symbol,
+                'analysis_type': 'technical_analysis'
+            }
+            
+            # LLM facade handles all response processing internally
+            # technical_result should be a properly processed dict
+            if isinstance(technical_result, dict) and 'error' not in technical_result:
+                analysis_result = technical_result
+                symbol_logger.info(f"Successfully received processed technical analysis response")
+            else:
+                error_msg = f"LLM facade returned error for technical analysis of {symbol}: {technical_result.get('error', 'Unknown error')}"
+                symbol_logger.error(error_msg)
+                analysis_result = technical_result  # Return error response as-is
             
             # Save prompts to cache
             self._save_technical_prompts_to_cache(symbol, analysis_prompt, system_prompt, ai_response)
             
-            # Save to database
-            self._save_llm_response_to_db(symbol, analysis_prompt, system_prompt, ai_response, processing_time_ms)
+            # Note: LLM facade already handles response processing and caching internally
+            # No need to manually save LLM responses here
             
             symbol_logger.info(f"AI technical analysis completed in {processing_time_ms}ms")
             logger.info(f"✅ Completed AI technical analysis for {symbol} in {processing_time_ms}ms")
@@ -974,24 +645,35 @@ Price Performance:
         try:
             score = 5.0  # Start with neutral
             
+            # Get values from dictionaries
+            ma = indicators.moving_averages
+            mom = indicators.momentum_indicators
+            vol = indicators.volatility_indicators
+            volume = indicators.volume_indicators
+            
             # Moving Average Score (25% weight)
             ma_score = 5.0
-            current = indicators.current_price
+            current = indicators.current_price or 0
+            
+            sma_20 = ma.get('SMA_20', 0)
+            sma_50 = ma.get('SMA_50', 0)
+            sma_200 = ma.get('SMA_200', 0)
+            ema_20 = ma.get('EMA_20', 0)
             
             # Short-term MA comparison
-            if current > indicators.sma_20 > indicators.sma_50:
+            if current > sma_20 > sma_50:
                 ma_score += 1.5  # Bullish alignment
-            elif current < indicators.sma_20 < indicators.sma_50:
+            elif current < sma_20 < sma_50:
                 ma_score -= 1.5  # Bearish alignment
             
             # Long-term trend
-            if current > indicators.sma_200:
+            if current > sma_200:
                 ma_score += 1.0  # Above long-term trend
             else:
                 ma_score -= 1.0  # Below long-term trend
             
             # EMA vs SMA strength
-            if indicators.ema_20 > indicators.sma_20:
+            if ema_20 > sma_20:
                 ma_score += 0.5  # Recent momentum positive
             else:
                 ma_score -= 0.5  # Recent momentum negative
@@ -999,76 +681,91 @@ Price Performance:
             # Momentum Score (25% weight)
             momentum_score = 5.0
             
+            rsi_14 = mom.get('RSI_14', 50)  # Default to neutral
+            macd = mom.get('MACD', 0)
+            macd_signal = mom.get('MACD_SIGNAL', 0)
+            macd_histogram = mom.get('MACD_HISTOGRAM', 0)
+            stoch_k = mom.get('STOCH_K', 50)
+            
             # RSI analysis
-            if 40 <= indicators.rsi_14 <= 60:
+            if 40 <= rsi_14 <= 60:
                 momentum_score += 1.0  # Neutral zone
-            elif 60 < indicators.rsi_14 <= 70:
+            elif 60 < rsi_14 <= 70:
                 momentum_score += 1.5  # Bullish but not overbought
-            elif 30 <= indicators.rsi_14 < 40:
+            elif 30 <= rsi_14 < 40:
                 momentum_score -= 1.5  # Bearish but not oversold
-            elif indicators.rsi_14 > 80:
+            elif rsi_14 > 80:
                 momentum_score -= 1.0  # Overbought
-            elif indicators.rsi_14 < 20:
+            elif rsi_14 < 20:
                 momentum_score += 0.5  # Oversold reversal potential
             
             # MACD analysis
-            if indicators.macd > indicators.macd_signal and indicators.macd_histogram > 0:
+            if macd > macd_signal and macd_histogram > 0:
                 momentum_score += 1.0  # Bullish MACD
-            elif indicators.macd < indicators.macd_signal and indicators.macd_histogram < 0:
+            elif macd < macd_signal and macd_histogram < 0:
                 momentum_score -= 1.0  # Bearish MACD
             
             # Stochastic analysis
-            if 20 <= indicators.stoch_k <= 80:
+            if 20 <= stoch_k <= 80:
                 momentum_score += 0.5  # Not extreme
             
             # Volume Score (20% weight)
             volume_score = 5.0
             
+            volume_ratio = volume.get('VOLUME_RATIO', 1.0)
+            money_flow_index = mom.get('MFI', 50)  # MFI is in momentum indicators
+            
             # Volume ratio analysis
-            if indicators.volume_ratio > 1.5:
+            if volume_ratio > 1.5:
                 volume_score += 1.5  # High volume
-            elif indicators.volume_ratio < 0.5:
+            elif volume_ratio < 0.5:
                 volume_score -= 1.0  # Low volume
             
             # Money Flow Index
-            if 40 <= indicators.money_flow_index <= 60:
+            if 40 <= money_flow_index <= 60:
                 volume_score += 1.0  # Balanced
-            elif indicators.money_flow_index > 80:
+            elif money_flow_index > 80:
                 volume_score -= 0.5  # Overbought
-            elif indicators.money_flow_index < 20:
+            elif money_flow_index < 20:
                 volume_score += 0.5  # Oversold
             
             # Support/Resistance Score (15% weight)
             sr_score = 5.0
             
             # Position relative to support/resistance
-            if current > indicators.resistance_level_1:
+            resistance_level_1 = indicators.resistance_levels[0] if indicators.resistance_levels else current
+            support_level_1 = indicators.support_levels[0] if indicators.support_levels else current
+            
+            if current > resistance_level_1:
                 sr_score += 1.0  # Above resistance
-            elif current < indicators.support_level_1:
+            elif current < support_level_1:
                 sr_score -= 1.0  # Below support
             
             # Bollinger Band position
-            if 0.3 <= indicators.bb_position <= 0.7:
+            bb_position = vol.get('BB_POSITION', 0.5)
+            if 0.3 <= bb_position <= 0.7:
                 sr_score += 0.5  # Middle range
-            elif indicators.bb_position > 0.8:
+            elif bb_position > 0.8:
                 sr_score -= 0.5  # Near upper band
-            elif indicators.bb_position < 0.2:
+            elif bb_position < 0.2:
                 sr_score += 0.5  # Near lower band (reversal potential)
             
             # Volatility Score (15% weight)
             volatility_score = 5.0
             
             # ATR relative to price
-            atr_ratio = indicators.atr_14 / indicators.current_price
+            atr_14 = vol.get('ATR_14', 0)
+            atr_ratio = atr_14 / current if current > 0 else 0
             if 0.01 <= atr_ratio <= 0.03:
                 volatility_score += 1.0  # Normal volatility
             elif atr_ratio > 0.05:
                 volatility_score -= 1.0  # High volatility
             
             # Bollinger Band width
-            if indicators.bb_width < 0.1:
+            bb_width = vol.get('BB_WIDTH', 0.2)
+            if bb_width < 0.1:
                 volatility_score += 0.5  # Low volatility (potential breakout)
-            elif indicators.bb_width > 0.3:
+            elif bb_width > 0.3:
                 volatility_score -= 0.5  # High volatility
             
             # Weighted final score
@@ -1118,16 +815,42 @@ Price Performance:
         except Exception as e:
             logger.warning(f"Error saving technical prompts to cache: {e}")
     
-    def _save_llm_response_to_db(self, symbol: str, prompt: str, system_prompt: str, response: str, processing_time_ms: int):
+    def _get_latest_fiscal_period(self):
+        """
+        Determine the latest fiscal period for cache key generation.
+        Returns intelligent defaults for technical analysis.
+        """
+        try:
+            from datetime import datetime
+            current_date = datetime.now()
+            current_year = current_date.year
+            
+            # Determine fiscal quarter based on current month
+            month = current_date.month
+            if month <= 3:
+                fiscal_period = "Q4"  # Q4 of previous year
+                fiscal_year = current_year - 1
+            elif month <= 6:
+                fiscal_period = "Q1"
+                fiscal_year = current_year
+            elif month <= 9:
+                fiscal_period = "Q2"
+                fiscal_year = current_year
+            else:
+                fiscal_period = "Q3"
+                fiscal_year = current_year
+            
+            return fiscal_year, fiscal_period
+            
+        except Exception as e:
+            logger.warning(f"Could not determine fiscal period: {e}, using defaults")
+            return datetime.now().year, "FY"
+    
+    def _save_llm_response_to_db(self, symbol: str, prompt: str, system_prompt: str, response: str, processing_time_ms: int, response_metadata: Dict = None):
         """Save LLM response using cache manager for technical analysis"""
         try:
-            # Prepare prompt context
-            prompt_context = {
-                'system_prompt': system_prompt,
-                'user_prompt': prompt[:1000],  # Truncate for storage
-                'prompt_length': len(prompt),
-                'prompt': prompt  # Also save full prompt
-            }
+            # Prepare prompt data (store full prompt directly)
+            prompt_data = prompt
             
             # Prepare model info
             model_info = {
@@ -1173,10 +896,21 @@ Price Performance:
                     }
                     metadata['summary'] = parsed_data.get('trend_analysis', '')
             
+            # Determine fiscal period for cache key
+            fiscal_year, fiscal_period = self._get_latest_fiscal_period()
+            
             # Save using cache manager (will handle both disk and RDBMS storage)
-            cache_key = (symbol, 'ta', 'N/A', 'N/A')  # symbol, llm_type, period, form_type
+            # Use intelligent defaults: TECHNICAL as form_type for technical analysis
+            cache_key = {
+                'symbol': symbol,
+                'form_type': 'TECHNICAL',  # Intelligent default for technical analysis
+                'period': f"{fiscal_year}-{fiscal_period}",
+                'fiscal_year': fiscal_year,  # Separate key for file pattern
+                'fiscal_period': fiscal_period,  # Separate key for file pattern
+                'llm_type': 'ta'
+            }
             cache_value = {
-                'prompt_context': prompt_context,
+                'prompt': prompt_data,
                 'model_info': model_info,
                 'response': response_obj,
                 'metadata': metadata
@@ -1210,12 +944,12 @@ Price Performance:
             logger.warning(f"Error saving CSV to cache: {e}")
     
     def _save_analysis_to_db(self, symbol: str, analysis_result: Dict):
-        """Save technical analysis results to database"""
+        """Technical analysis results are saved to parquet files only (no database)"""
         try:
-            # Save to technical analysis table (implementation depends on your DB schema)
-            logger.info(f"💾 Saved technical analysis for {symbol} to database")
+            # Technical indicators use parquet-only storage as configured centrally
+            logger.info(f"💾 Technical analysis for {symbol} saved to parquet storage only")
         except Exception as e:
-            logger.warning(f"Error saving analysis to database: {e}")
+            logger.warning(f"Note: Technical analysis uses parquet-only storage: {e}")
     
     def _create_default_analysis(self, symbol: str, error_message: str) -> Dict:
         """Create default analysis when errors occur"""
@@ -1234,98 +968,79 @@ Price Performance:
             'error': error_message
         }
     
-    def _create_enhanced_dataframe(self, df: pd.DataFrame, indicators: TechnicalAnalysisData) -> pd.DataFrame:
-        """Create enhanced dataframe with all technical indicators for parquet storage"""
-        try:
-            # The df already contains all the calculated indicators from _calculate_comprehensive_indicators
-            # We just need to add some metadata columns
-            enhanced_df = df.copy()
-            
-            # Ensure we have the basic OHLCV columns
-            required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
-            for col in required_cols:
-                if col not in enhanced_df.columns:
-                    logger.warning(f"Missing required column: {col}")
-                    enhanced_df[col] = 0.0
-            
-            # Don't add Date column - the index already contains this information
-            # This prevents duplicate column errors when saving to parquet
-            
-            # Add symbol column
-            enhanced_df['Symbol'] = indicators.symbol
-            
-            # Note: Support/resistance/fibonacci levels are single values, not time series
-            # They shouldn't be added as columns to every row
-            # They're already available in the indicators object for reporting
-            
-            # Fill any NaN values with forward fill then backward fill
-            enhanced_df = enhanced_df.ffill().bfill()
-            
-            logger.info(f"Created enhanced dataframe with {len(enhanced_df.columns)} columns for parquet storage")
-            return enhanced_df
-            
-        except Exception as e:
-            logger.error(f"Error creating enhanced dataframe: {e}")
-            return df.copy()
-    
     def _save_to_parquet(self, symbol: str, df: pd.DataFrame, days: int = 365):
-        """Save enhanced price data with indicators to parquet file and cache"""
+        """Save enhanced price data with indicators to cache using pandas DataFrame with parquet.gz compression"""
         try:
-            # First save to traditional parquet file for backward compatibility
-            parquet_file = self.price_cache_dir / f"{symbol}.parquet"
-            df.to_parquet(parquet_file, compression='snappy', index=True)
-            
-            logger.info(f"💾 Saved price data with indicators to {parquet_file}")
-            logger.info(f"📊 Parquet file contains {len(df)} rows and {len(df.columns)} columns")
-            
-            # Also save to cache manager with gzip compression
+            # Use cache manager exclusively for pandas DataFrame storage with parquet.gz compression
             cache_key = (symbol, 'technical_data', f'{days}d')
             
-            # Prepare data for cache - avoid duplicate Date column
-            cache_df = df.copy()
-            if 'Date' in cache_df.columns and isinstance(cache_df.index, pd.DatetimeIndex):
-                # Drop the Date column since it's already in the index
-                cache_df = cache_df.drop('Date', axis=1)
+            # Ensure index is datetime for proper parquet storage
+            if not isinstance(df.index, pd.DatetimeIndex):
+                df.index = pd.to_datetime(df.index)
             
+            # Prepare comprehensive metadata for technical indicators
+            technical_indicator_columns = [col for col in df.columns if any(x in col for x in [
+                'SMA_', 'EMA_', 'RSI_', 'MACD', 'BB_', 'Fib_', 'ATR_', 'Pivot_', 
+                'Stoch_', 'Williams_', 'MFI_', 'Volume_', 'OBV', 'VPT', 'AD', 'VWAP',
+                'Support_', 'Resistance_', 'Price_Change_', 'Volatility_'
+            ])]
+            
+            # Prepare cache value with pandas DataFrame and comprehensive metadata
             cache_value = {
-                'dataframe': cache_df,
-                'data': cache_df.reset_index().to_dict('records'),  # Include index in data
+                'dataframe': df,  # Store the complete enhanced DataFrame with all calculated indicators
                 'metadata': {
                     'symbol': symbol,
                     'days': days,
-                    'start_date': str(cache_df.index.min()),
-                    'end_date': str(cache_df.index.max()),
-                    'records': len(cache_df),
-                    'columns': list(cache_df.columns),
-                    'indicators_included': True
+                    'start_date': str(df.index.min()),
+                    'end_date': str(df.index.max()),
+                    'records': len(df),
+                    'total_columns': len(df.columns),
+                    'price_columns': ['Open', 'High', 'Low', 'Close', 'Volume'],
+                    'technical_indicator_columns': technical_indicator_columns,
+                    'technical_indicators_count': len(technical_indicator_columns),
+                    'indicators_included': True,
+                    'fibonacci_included': any('Fib_' in col for col in df.columns),
+                    'pivot_points_included': any('Pivot_' in col for col in df.columns),
+                    'volume_indicators_included': any(x in str(df.columns) for x in ['OBV', 'VPT', 'AD', 'VWAP', 'Volume_Ratio']),
+                    'calculation_method': 'centralized_technical_calculator',
+                    'data_source': 'yahoo_finance',
+                    'cache_timestamp': datetime.utcnow().isoformat()
                 }
             }
             
-            # Save to cache (will use ParquetCacheStorageHandler with gzip)
+            # Save to cache using ParquetCacheStorageHandler (pandas → parquet.gz conversion)
             success = self.cache_manager.set(CacheType.TECHNICAL_DATA, cache_key, cache_value)
             
             if success:
-                logger.info(f"💾 Saved technical data to cache with gzip compression for {symbol}")
-                # Get cache info to log compression stats
-                cached_info = self.cache_manager.get(CacheType.TECHNICAL_DATA, cache_key)
-                if cached_info and 'cache_info' in cached_info:
-                    cache_info = cached_info['cache_info']
-                    logger.info(f"📊 Cache stats: {cache_info.get('records')} records, compressed with {cache_info.get('compression', 'unknown')}")
+                logger.info(f"💾 Cached {len(df)} records with {len(technical_indicator_columns)} technical indicators (pandas → parquet.gz)")
+                
+                # Verify cache retrieval to confirm pandas DataFrame flow
+                try:
+                    cached_info = self.cache_manager.get(CacheType.TECHNICAL_DATA, cache_key)
+                    if cached_info and 'dataframe' in cached_info:
+                        cached_df = cached_info['dataframe']
+                        cache_metadata = cached_info.get('cache_info', {})
+                        logger.info(f"📊 Cache verification: {len(cached_df)} records, {cache_metadata.get('compression', 'unknown')} compression, {len(cached_df.columns)} columns")
+                        logger.debug(f"🔍 Sample columns: {list(cached_df.columns)[:10]}...")
+                    else:
+                        logger.warning("Cache verification failed: no dataframe in cached data")
+                except Exception as verify_error:
+                    logger.warning(f"Cache verification failed: {verify_error}")
+                    
             else:
-                logger.warning(f"Failed to save technical data to cache for {symbol}")
+                logger.error(f"Failed to save technical data to cache for {symbol}")
+                # Fallback: save legacy parquet file
+                try:
+                    parquet_file = self.price_cache_dir / f"{symbol}.parquet"
+                    df.to_parquet(parquet_file, compression='gzip', index=True)
+                    logger.info(f"📄 Fallback: saved legacy parquet file with gzip compression: {parquet_file}")
+                except Exception as fallback_error:
+                    logger.error(f"Fallback parquet save also failed: {fallback_error}")
             
         except Exception as e:
-            logger.error(f"Error saving to parquet: {e}")
-    
-    def _calculate_vwap(self, df: pd.DataFrame) -> pd.Series:
-        """Calculate Volume Weighted Average Price"""
-        try:
-            typical_price = (df['High'] + df['Low'] + df['Close']) / 3
-            vwap = (typical_price * df['Volume']).cumsum() / df['Volume'].cumsum()
-            return vwap.fillna(df['Close'])
-        except Exception as e:
-            logger.warning(f"Error calculating VWAP: {e}")
-            return df['Close']
+            logger.error(f"Error saving technical data to cache: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
     
     @staticmethod
     def load_price_data(symbol: str, config=None) -> Optional[pd.DataFrame]:
@@ -1362,8 +1077,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Comprehensive Technical Analysis")
     parser.add_argument("--symbol", required=True, help="Stock symbol to analyze")
     parser.add_argument("--days", type=int, default=365, help="Number of days of data to fetch")
+    parser.add_argument("--test-data", action="store_true", help="Test data fetching")
     
     args = parser.parse_args()
+    
+    # Display technical analysis banner
+    ASCIIArt.print_banner('technical')
     
     # Set up logging
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -1371,6 +1090,7 @@ if __name__ == "__main__":
     try:
         result = analyze_symbol(args.symbol, args.days)
         print(f"\n=== TECHNICAL ANALYSIS RESULTS FOR {args.symbol} ===")
+        print(f"Current Price: ${result['indicators']['current_price']:.2f}")
         print(f"Technical Score: {result['technical_score']}/10")
         print(f"Data Points: {result['data_points']}")
         print(f"Analysis Timestamp: {result['analysis_timestamp']}")

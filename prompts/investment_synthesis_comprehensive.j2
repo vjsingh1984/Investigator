@@ -1,0 +1,118 @@
+You are a senior institutional portfolio manager with CFA designation, specializing in technical-fundamental synthesis for $2B+ portfolios.
+
+**PORTFOLIO SYNTHESIS TASK:** {{ symbol }} Investment Decision  
+**Price:** ${{ current_price }} | **Date:** {{ analysis_date }}
+
+**CONTEXT:** Comprehensive fundamental analysis is already completed. Your role is to synthesize technical analysis with fundamental scores to make final portfolio allocation decisions. Focus on timing, position sizing, and risk management.
+
+**FUNDAMENTAL SCORES SUMMARY** (from completed SEC analysis):
+{% if comprehensive_analysis %}
+{% set comp_data = comprehensive_analysis | from_json if comprehensive_analysis is string else comprehensive_analysis %}
+{% if comp_data %}
+- Financial Health: {{ comp_data.get('financial_health_score', 'N/A') }}/10
+- Business Quality: {{ comp_data.get('business_quality_score', 'N/A') }}/10  
+- Growth Prospects: {{ comp_data.get('growth_prospects_score', 'N/A') }}/10
+- Overall Fundamental: {{ comp_data.get('overall_score', 'N/A') }}/10
+{% endif %}
+{% endif %}
+
+**TECHNICAL ANALYSIS FOR TIMING:**
+{% if technical_analysis %}
+{{ technical_analysis }}
+{% else %}
+[NO TECHNICAL ANALYSIS - FUNDAMENTAL-ONLY DECISION]
+{% endif %}
+
+**MARKET CONDITIONS:**
+{{ market_data | tojson(indent=2) }}
+
+**CRITICAL: Respond with ONLY valid JSON. No markdown, no text outside JSON.**
+
+**REQUIRED JSON STRUCTURE:**
+Focus on portfolio allocation decisions and technical-fundamental synthesis.
+
+{
+  "portfolio_recommendation": {
+    "final_recommendation": "STRONG_BUY|BUY|HOLD|SELL|STRONG_SELL",
+    "confidence_level": "HIGH|MEDIUM|LOW",
+    "overall_score": 8.5,
+    "fundamental_score": 8.2,
+    "technical_score": 7.8,
+    "score_methodology": "Technical timing overlay on fundamental strength"
+  },
+  "timing_and_allocation": {
+    "entry_timing": "IMMEDIATE|WAIT_FOR_DIP|GRADUAL_ENTRY|AVOID",
+    "optimal_entry_zone": {"lower_bound": 0.0, "upper_bound": 0.0},
+    "position_size": "LARGE|MODERATE|SMALL|AVOID",
+    "time_horizon": "SHORT_TERM|MEDIUM_TERM|LONG_TERM",
+    "risk_reward_ratio": 2.5,
+    "stop_loss_level": 0.0
+  },
+  "fundamental_assessment": {
+    "financial_health": {
+      "score": 8.2,
+      "key_strengths": ["Revenue growth momentum", "Margin expansion", "Cash generation efficiency"],
+      "key_concerns": ["Market saturation risks", "Competitive pressure"]
+    },
+    "income_analysis": {
+      "revenue_quality": 9.0,
+      "margin_trends": "EXPANDING|STABLE|CONTRACTING",
+      "earnings_sustainability": 8.5,
+      "key_metrics": "TTM revenue growth patterns, operating leverage analysis, earnings quality indicators"
+    },
+    "balance_sheet_analysis": {
+      "asset_quality": 8.0,
+      "capital_structure": "CONSERVATIVE|MODERATE|AGGRESSIVE",
+      "liquidity_position": 8.5,
+      "key_metrics": "Debt/equity optimization, working capital efficiency, asset utilization"
+    },
+    "cash_flow_analysis": {
+      "operating_cf_quality": 8.5,
+      "fcf_generation": 8.0,
+      "capital_allocation": "EXCELLENT|GOOD|POOR",
+      "key_metrics": "FCF conversion rates, capex efficiency, shareholder value creation"
+    }
+  },
+  "technical_assessment": {
+    "trend_analysis": {
+      "primary_trend": "BULLISH|BEARISH|NEUTRAL",
+      "trend_strength": "STRONG|MODERATE|WEAK",
+      "momentum_signals": "Comprehensive momentum assessment from multiple timeframes"
+    },
+    "entry_timing": {
+      "optimal_entry_zone": {"lower_bound": 0.0, "upper_bound": 0.0},
+      "timing_confidence": "HIGH|MEDIUM|LOW"
+    }
+  },
+  "risk_analysis": {
+    "overall_risk_score": 6.5,
+    "key_risks": ["Systematic risk factors", "Company-specific risks", "Market timing risks"],
+    "risk_mitigation": "Portfolio-level risk management strategies"
+  },
+  "key_catalysts": [
+    {"catalyst": "Near-term catalyst description", "timeframe": "Q1 2025", "probability": "HIGH|MEDIUM|LOW"},
+    {"catalyst": "Medium-term catalyst description", "timeframe": "H2 2025", "probability": "HIGH|MEDIUM|LOW"},
+    {"catalyst": "Long-term strategic catalyst", "timeframe": "2026+", "probability": "HIGH|MEDIUM|LOW"}
+  ],
+  "executive_summary": {
+    "investment_thesis": "2-3 sentence compelling investment thesis integrating {{ quarterly_count }}-quarter fundamental strength analysis with technical timing signals for institutional portfolio context.",
+    "key_conviction": "Primary investment conviction based on sustainable competitive advantages and market positioning"
+  },
+  "analysis_thinking": "Step-by-step reasoning process explaining how you arrived at each score, including which specific metrics and data points influenced your decisions",
+  "synthesis_details": "Detailed explanation of how fundamental and technical factors were weighted and combined to reach the final recommendation"
+}
+
+**SCORING GUIDELINES:**
+- Overall Score: 1-10 (10=Strong Buy, 1=Strong Sell)
+- Fundamental Score: Weighted average of financial statement scores
+- Technical Score: From technical analysis (trend, momentum, support/resistance)
+- Income Statement Score: Revenue quality + margin trends + earnings sustainability
+- Balance Sheet Score: Asset quality + capital structure + liquidity strength  
+- Cash Flow Score: Operating CF quality + FCF generation + capital allocation
+- Growth Score: Revenue growth + earnings growth + market expansion potential
+- Value Score: P/E ratio + P/B ratio + DCF valuation vs current price
+- Weight fundamental 60%, technical 40% for overall score
+
+**IMPORTANT:** Extract financial_health_score, business_quality_score, and growth_prospects_score from the comprehensive fundamental analysis section if available. Use these as inputs for your scoring.
+
+**PROVIDE SPECIFIC NUMERIC SCORES (1-10) FOR ALL CATEGORIES.**

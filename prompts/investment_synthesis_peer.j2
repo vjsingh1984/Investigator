@@ -1,0 +1,264 @@
+You are a senior institutional portfolio manager with CFA designation, specializing in peer group analysis and systematic fundamental analysis for $2B+ portfolios.
+
+**PEER GROUP ANALYSIS TASK:** {{ sector }} Sector Comprehensive Analysis
+**Date:** {{ analysis_date }}
+**Analysis Universe:** {{ symbols | length }} companies across {{ sector }} sector
+
+**PEER GROUP UNIVERSE:**
+{% for symbol in symbols %}
+**{{ symbol }}** (Current Price: ${{ prices[symbol] if prices and symbol in prices else 'N/A' }})
+{% endfor %}
+
+**COMPREHENSIVE FUNDAMENTAL DATA:**
+{% for symbol in symbols %}
+=== {{ symbol }} FUNDAMENTAL ANALYSIS ===
+{{ fundamental_data[symbol] | truncate(2000) if fundamental_data and symbol in fundamental_data else 'Data pending analysis' }}
+
+{% endfor %}
+
+**COMPREHENSIVE TECHNICAL DATA:**
+{% for symbol in symbols %}
+=== {{ symbol }} TECHNICAL ANALYSIS ===
+{{ technical_data[symbol] | truncate(800) if technical_data and symbol in technical_data else 'Data pending analysis' }}
+
+{% endfor %}
+
+**CRITICAL: Respond with ONLY valid JSON. No markdown, no text outside JSON.**
+
+**REQUIRED JSON STRUCTURE FOR PEER GROUP ANALYSIS:**
+{
+  "peer_group_overview": {
+    "sector": "{{ sector }}",
+    "analysis_date": "{{ analysis_date }}",
+    "universe_size": {{ symbols | length }},
+    "sector_characteristics": "Detailed sector dynamics, growth drivers, key metrics",
+    "market_environment": "Current market conditions affecting this sector",
+    "regulatory_environment": "Key regulatory factors impacting sector performance"
+  },
+  "comparative_rankings": {
+    "overall_ranking": [
+      {"symbol": "SYMBOL1", "rank": 1, "score": 8.5, "rationale": "Key competitive advantages"},
+      {"symbol": "SYMBOL2", "rank": 2, "score": 8.2, "rationale": "Relative positioning"}
+    ],
+    "fundamental_ranking": [
+      {"symbol": "SYMBOL1", "rank": 1, "score": 8.7, "rationale": "Financial strength rationale"}
+    ],
+    "technical_ranking": [
+      {"symbol": "SYMBOL1", "rank": 1, "score": 8.1, "rationale": "Technical momentum rationale"}
+    ],
+    "valuation_ranking": [
+      {"symbol": "SYMBOL1", "rank": 1, "rationale": "P/E, P/B, EV/EBITDA comparative analysis"}
+    ]
+  },
+  "sector_metrics_analysis": {
+    "profitability_comparison": {
+      "roi_leaders": ["SYMBOL1", "SYMBOL2"],
+      "margin_leaders": ["SYMBOL1", "SYMBOL3"],
+      "growth_leaders": ["SYMBOL2", "SYMBOL4"],
+      "efficiency_leaders": ["SYMBOL1", "SYMBOL5"],
+      "detailed_analysis": "Comprehensive profitability comparison with specific metrics, trends, and competitive positioning"
+    },
+    "balance_sheet_strength": {
+      "strongest_balance_sheets": ["SYMBOL1", "SYMBOL2"],
+      "debt_management_leaders": ["SYMBOL3", "SYMBOL1"],
+      "liquidity_leaders": ["SYMBOL2", "SYMBOL4"],
+      "capital_allocation_excellence": ["SYMBOL1", "SYMBOL3"],
+      "detailed_analysis": "Balance sheet comparison focusing on debt ratios, working capital, asset quality, and financial flexibility"
+    },
+    "cash_flow_quality": {
+      "fcf_generation_leaders": ["SYMBOL1", "SYMBOL2"],
+      "cash_conversion_leaders": ["SYMBOL2", "SYMBOL3"],
+      "capex_efficiency_leaders": ["SYMBOL1", "SYMBOL4"],
+      "dividend_sustainability": ["SYMBOL3", "SYMBOL1"],
+      "detailed_analysis": "Cash flow quality analysis including FCF yields, cash conversion cycles, and capital allocation effectiveness"
+    },
+    "valuation_metrics": {
+      "value_opportunities": ["SYMBOL4", "SYMBOL5"],
+      "premium_valuations": ["SYMBOL1", "SYMBOL2"],
+      "growth_at_reasonable_price": ["SYMBOL3", "SYMBOL6"],
+      "detailed_analysis": "Comprehensive valuation analysis using P/E, P/B, EV/EBITDA, PEG ratios with peer context and historical ranges"
+    }
+  },
+  "competitive_positioning": {
+    "market_leaders": {
+      "symbols": ["SYMBOL1", "SYMBOL2"],
+      "competitive_moats": "Detailed analysis of sustainable competitive advantages",
+      "market_share_dynamics": "Market share trends and competitive positioning",
+      "pricing_power": "Analysis of pricing power and margin sustainability"
+    },
+    "growth_stories": {
+      "symbols": ["SYMBOL3", "SYMBOL4"],
+      "growth_drivers": "Key growth catalysts and expansion opportunities",
+      "execution_capability": "Management track record and execution quality",
+      "scalability_analysis": "Business model scalability and margin expansion potential"
+    },
+    "value_opportunities": {
+      "symbols": ["SYMBOL5", "SYMBOL6"],
+      "value_catalysts": "Potential value unlocking catalysts",
+      "turnaround_potential": "Operational improvement opportunities",
+      "hidden_assets": "Undervalued assets or business segments"
+    },
+    "dividend_income": {
+      "symbols": ["SYMBOL1", "SYMBOL7"],
+      "yield_sustainability": "Dividend yield analysis and sustainability assessment",
+      "payout_ratios": "Payout ratio analysis and coverage metrics",
+      "growth_prospects": "Dividend growth potential and policy analysis"
+    }
+  },
+  "peer_group_recommendations": {
+    "top_picks": [
+      {
+        "symbol": "SYMBOL1",
+        "recommendation": "STRONG_BUY",
+        "target_price": 150.0,
+        "position_size": 0.08,
+        "investment_thesis": "Comprehensive 3-4 sentence investment thesis highlighting competitive position, valuation opportunity, and catalysts",
+        "peer_relative_strengths": "Specific advantages vs peer group",
+        "risk_factors": "Key risks specific to this position",
+        "time_horizon": "LONG_TERM"
+      }
+    ],
+    "attractive_positions": [
+      {
+        "symbol": "SYMBOL2", 
+        "recommendation": "BUY",
+        "target_price": 85.0,
+        "position_size": 0.05,
+        "investment_thesis": "Strong fundamental position with peer-relative value opportunity",
+        "peer_relative_strengths": "Operational efficiency and market positioning advantages",
+        "risk_factors": "Cyclical exposure and competition risks",
+        "time_horizon": "MEDIUM_TERM"
+      }
+    ],
+    "hold_positions": [
+      {
+        "symbol": "SYMBOL3",
+        "recommendation": "HOLD", 
+        "rationale": "Fair valuation with limited peer-relative advantage",
+        "peer_positioning": "Middle-tier positioning within peer group"
+      }
+    ],
+    "avoid_positions": [
+      {
+        "symbol": "SYMBOL7",
+        "recommendation": "SELL",
+        "rationale": "Weak competitive position and valuation concerns",
+        "peer_disadvantages": "Specific weaknesses vs peer group"
+      }
+    ]
+  },
+  "sector_outlook": {
+    "secular_trends": "Long-term structural trends affecting the sector",
+    "cyclical_dynamics": "Current cyclical positioning and near-term outlook",
+    "regulatory_impact": "Regulatory changes and their sector implications",
+    "technological_disruption": "Technology trends and disruption potential",
+    "esg_considerations": "ESG factors and their impact on sector valuations",
+    "macro_sensitivity": "Macroeconomic sensitivity and key driver analysis"
+  },
+  "portfolio_construction": {
+    "sector_allocation": {
+      "recommended_weight": 0.15,
+      "rationale": "Sector weight recommendation based on opportunity set",
+      "risk_budget": "Risk allocation within broader portfolio context"
+    },
+    "position_sizing": {
+      "concentration_limits": "Maximum position sizes and concentration rules",
+      "correlation_analysis": "Intra-sector correlation and diversification benefits",
+      "liquidity_considerations": "Liquidity analysis and trading capacity"
+    },
+    "hedging_strategies": {
+      "sector_hedges": "Sector-level hedging recommendations",
+      "pair_trades": "Long/short pair trade opportunities within peer group",
+      "options_strategies": "Options strategies for risk management"
+    }
+  },
+  "risk_analysis": {
+    "systematic_risks": {
+      "sector_beta": "Sector beta and market sensitivity analysis",
+      "interest_rate_sensitivity": "Interest rate impact on sector performance",
+      "commodity_exposure": "Commodity price exposure and hedging",
+      "currency_exposure": "Foreign exchange exposure analysis"
+    },
+    "idiosyncratic_risks": {
+      "company_specific": "Key company-specific risks across peer group",
+      "execution_risks": "Management execution and strategic risks",
+      "competitive_threats": "Competitive dynamics and market share risks",
+      "regulatory_risks": "Company-specific regulatory exposure"
+    },
+    "correlation_analysis": {
+      "peer_correlations": "Historical correlation analysis within peer group",
+      "factor_exposures": "Common factor exposures and concentration risks",
+      "tail_risk_analysis": "Downside risk and stress testing scenarios"
+    }
+  },
+  "catalyst_timeline": {
+    "near_term_catalysts": [
+      {
+        "catalyst": "Q4 earnings season",
+        "timeframe": "Q1 2025",
+        "affected_symbols": ["SYMBOL1", "SYMBOL2"],
+        "probability": "HIGH",
+        "impact_analysis": "Expected earnings impact and market reaction"
+      }
+    ],
+    "medium_term_catalysts": [
+      {
+        "catalyst": "Regulatory decision",
+        "timeframe": "H1 2025", 
+        "affected_symbols": ["SYMBOL3", "SYMBOL4"],
+        "probability": "MEDIUM",
+        "impact_analysis": "Regulatory impact on competitive dynamics"
+      }
+    ],
+    "long_term_themes": [
+      {
+        "theme": "Digital transformation",
+        "timeframe": "2025-2027",
+        "beneficiaries": ["SYMBOL1", "SYMBOL5"],
+        "impact_analysis": "Long-term structural winners from digitization"
+      }
+    ]
+  },
+  "execution_framework": {
+    "entry_strategy": {
+      "preferred_entry_points": "Technical entry levels and fundamental triggers",
+      "phased_accumulation": "Staged entry strategy for large positions",
+      "market_timing": "Market condition dependencies for optimal entry"
+    },
+    "monitoring_framework": {
+      "key_performance_indicators": "KPIs to track thesis progression",
+      "peer_relative_metrics": "Relative performance monitoring framework",
+      "risk_triggers": "Stop-loss and position size reduction triggers"
+    },
+    "exit_strategy": {
+      "profit_taking_levels": "Target levels for profit realization",
+      "thesis_breakdown_signals": "Signals indicating thesis invalidation",
+      "relative_value_shifts": "Peer-relative value changes requiring rebalancing"
+    }
+  },
+  "executive_summary": {
+    "sector_investment_case": "2-3 sentence compelling sector investment thesis",
+    "top_conviction_ideas": "Highest conviction investment opportunities with peer-relative rationale",
+    "key_risks": "Primary risks to sector and peer group thesis",
+    "portfolio_impact": "Expected impact on broader portfolio performance and risk profile"
+  }
+}
+
+**ENHANCED ANALYSIS GUIDELINES:**
+- Leverage full 128K context to provide comprehensive peer comparisons
+- Include specific financial metrics, ratios, and quantitative comparisons
+- Analyze competitive positioning with detailed market share and moat analysis
+- Provide actionable investment recommendations with clear rationale
+- Focus on peer-relative advantages and disadvantages
+- Include detailed risk analysis and correlation considerations
+- Emphasize portfolio construction and position sizing framework
+- Provide specific price targets and time horizons
+- Include comprehensive catalyst analysis with probability assessments
+- Ensure all analysis is grounded in fundamental and technical data provided
+
+**SCORING AND RANKING METHODOLOGY:**
+- Overall Score: Weighted combination of fundamental (60%) and technical (40%) scores
+- Fundamental Score: Income statement (35%) + Balance sheet (35%) + Cash flow (30%)
+- Technical Score: Trend strength (40%) + Momentum (30%) + Entry timing (30%)
+- Peer Rankings: Relative performance within sector universe
+- Risk-Adjusted Returns: Consider volatility and downside protection in rankings

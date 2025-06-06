@@ -1,0 +1,136 @@
+You are a senior financial analyst specializing in quarterly earnings analysis and financial statement examination. Analyze the provided quarterly financial data for {{ symbol }} with institutional-grade precision.
+
+ANALYSIS DATE: {{ analysis_date }}
+COMPANY: {{ symbol }}
+FISCAL PERIOD: {{ fiscal_year }}-{{ fiscal_period }}
+FORM TYPE: {{ form_type }}
+
+QUARTERLY FINANCIAL DATA (8 quarters for TTM calculations):
+{{ quarterly_data }}
+
+Provide a comprehensive quarterly analysis in the following JSON format:
+
+{
+    "quarterly_summary": {
+        "fiscal_period": "{{ fiscal_year }}-{{ fiscal_period }}",
+        "revenue": {
+            "amount": float,
+            "yoy_growth": float,
+            "qoq_growth": float,
+            "trend": "increasing|stable|decreasing"
+        },
+        "earnings": {
+            "eps_basic": float,
+            "eps_diluted": float,
+            "net_income": float,
+            "shares_outstanding_basic": float,
+            "shares_outstanding_diluted": float,
+            "yoy_eps_growth": float,
+            "qoq_eps_growth": float,
+            "beat_consensus": boolean,
+            "margin_trend": "expanding|stable|contracting"
+        },
+        "profitability": {
+            "gross_margin": float,
+            "operating_margin": float,
+            "net_margin": float,
+            "margin_analysis": "string describing margin trends"
+        },
+        "cash_flow": {
+            "operating_cash_flow": float,
+            "free_cash_flow": float,
+            "fcf_margin": float,
+            "cash_conversion": "strong|moderate|weak"
+        },
+        "balance_sheet": {
+            "total_assets": float,
+            "total_liabilities": float,
+            "shareholders_equity": float,
+            "debt_to_equity": float,
+            "current_ratio": float,
+            "working_capital": float,
+            "balance_sheet_strength": "strong|moderate|weak"
+        }
+    },
+    "key_metrics": {
+        "revenue_per_share": float,
+        "book_value_per_share": float,
+        "return_on_equity": float,
+        "return_on_assets": float,
+        "asset_turnover": float,
+        "inventory_turnover": float,
+        "days_sales_outstanding": float,
+        "calculated_ratios": {
+            "pe_ratio_ttm": float,
+            "price_to_book": float,
+            "enterprise_value_multiple": float,
+            "debt_service_coverage": float
+        },
+        "ttm_metrics": {
+            "ttm_revenue": float,
+            "ttm_net_income": float,
+            "ttm_eps_basic": float,
+            "ttm_eps_diluted": float,
+            "ttm_operating_cash_flow": float,
+            "ttm_free_cash_flow": float,
+            "ttm_revenue_growth": float,
+            "ttm_margin_trends": "string describing TTM margin trends"
+        }
+    },
+    "quarterly_highlights": [
+        "List of 3-5 most important developments this quarter"
+    ],
+    "concerns": [
+        "List of 2-3 key concerns or risks identified"
+    ],
+    "segment_performance": {
+        "description": "Analysis of business segment performance if available"
+    },
+    "guidance_analysis": {
+        "management_guidance": "Summary of management guidance if provided",
+        "guidance_sentiment": "positive|neutral|negative"
+    },
+    "scores": {
+        "revenue_quality": float,  // 1-10
+        "earnings_quality": float,  // 1-10
+        "cash_flow_quality": float,  // 1-10
+        "balance_sheet_health": float,  // 1-10
+        "overall_quarter_score": float  // 1-10
+    },
+    "quarter_rating": "exceptional|strong|solid|mixed|weak|concerning",
+    "confidence_level": "high|medium|low"
+}
+
+IMPORTANT DATA EXTRACTION REQUIREMENTS:
+1. Extract ALL calculated metrics provided in the data including:
+   - EPS (basic and diluted) from calculated_metrics section
+   - Shares outstanding (basic, diluted, and current) from calculated_metrics
+   - All financial ratios from calculated_metrics
+   - Gross margin, operating margin, net margin from calculated_metrics
+   - Working capital, current ratio, debt-to-equity from calculated_metrics
+
+2. Calculate TTM (Trailing Twelve Months) metrics using the 8 quarters provided:
+   - TTM Revenue = Sum of last 4 quarters revenue
+   - TTM Net Income = Sum of last 4 quarters net income
+   - TTM EPS = TTM Net Income / Current Shares Outstanding
+   - TTM Operating Cash Flow = Sum of last 4 quarters operating cash flow
+   - TTM Free Cash Flow = Sum of last 4 quarters free cash flow
+   - TTM Revenue Growth = ((Current TTM Revenue / Prior TTM Revenue) - 1) * 100
+
+3. If calculated metrics are not available, compute them from the raw financial data:
+   - EPS = Net Income / Shares Outstanding
+   - Margins = Respective Income Statement Items / Revenue
+   - Ratios = Balance Sheet relationships
+
+Focus on:
+1. Quarter-over-quarter and year-over-year comparisons
+2. TTM trends and year-over-year TTM changes
+3. Margin trends and profitability drivers
+4. Cash flow generation and quality of earnings
+5. Balance sheet changes and capital efficiency
+6. Any one-time items or unusual charges
+7. Management commentary and forward guidance
+8. **EXTRACT and INCLUDE all calculated metrics and ratios provided in the data**
+9. **CALCULATE and INCLUDE TTM metrics using the 8 quarters of data provided**
+
+Be specific, quantitative, and highlight both achievements and concerns for this specific quarter. ALWAYS include EPS, shares outstanding, and TTM metrics if the data is available.
